@@ -119,39 +119,71 @@ st.plotly_chart(fig1, use_container_width=True)
 # ==========================================
 # 💰 Competitor Pricing (Dynamic if available)
 # ==========================================
+
 st.subheader("💰 Competitor Pricing Overview")
 
 pricing_file = os.path.join(output_dir, "competitor_analysis.md")
 competitor_data = []
 
-# ---- Debug: show raw competitor_analysis.md to ensure Render sees it ----
 if os.path.exists(pricing_file):
     with open(pricing_file, "r", encoding="utf-8") as f:
-        raw_md = f.read()
-    with st.expander("🛠 Raw competitor_analysis.md (debug)", expanded=False):
-        st.text(raw_md)
+        text = f.read()
 
-    # ---- Extract competitors from markdown if available ----
-    lines = raw_md.splitlines()
-    competitor_name = None
+    # 1️⃣ Try to parse a structured markdown table if you later add it in the prompt
+    table_match = re.search(
+        r"## Structured Competitor Pricing.*?\n(\|.*\n)+",
+        text,
+        re.IGNORECASE,
+    )
 
-    for line in lines:
-        # Detect competitor header like: "### Competitor: **Name**"
-        header_match = re.search(r"###\s*Competitor[:\-\s]*\**(.+?)\**\s*$", line, re.IGNORECASE)
-        if header_match:
-            competitor_name = header_match.group(1).strip()
-            continue
+    if table_match:
+        table_text = table_match.group(0)
+        lines = [l.strip() for l in table_text.splitlines() if l.strip().startswith("|")]
+        if len(lines) >= 2:
+            data_lines = lines[2:]  # skip header + separator
+        else:
+            data_lines = []
 
-        # Detect a price anywhere on subsequent line: "Price: $123" or similar
-        price_match = re.search(r"price[^$0-9]*\$?\s*([0-9]+(?:\.[0-9]+)?)", line, re.IGNORECASE)
-        if price_match and competitor_name:
-            price_value = float(price_match.group(1))
-            competitor_data.append(
-                {"Competitor": competitor_name, "Price ($)": price_value}
+        for line in data_lines:
+            cols = [c.strip() for c in line.strip("|").split("|")]
+            if len(cols) >= 2:
+                name, price_str = cols[0], cols[1]
+                try:
+                    price = float(price_str)
+                    competitor_data.append({"Competitor": name, "Price ($)": price})
+                except ValueError:
+                    continue
+
+    # 2️⃣ If no table found, fall back to more flexible header/price parsing
+    if not competitor_data:
+        lines = text.splitlines()
+        competitor_name = None
+
+        for line in lines:
+            # Heading like: "### Competitor: **HydrateSpark PRO Tumbler**"
+            header_match = re.search(
+                r"###\s*Competitor[:\-\s]*\**(.+?)\**\s*$",
+                line,
+                re.IGNORECASE,
             )
-            competitor_name = None  # reset for next competitor
+            if header_match:
+                competitor_name = header_match.group(1).strip()
+                continue
 
-# ---- Use fallback sample if nothing extracted ----
+            # Line with a price like: "Price: $70" or "Price - 70 USD"
+            price_match = re.search(
+                r"price[^$0-9]*\$?\s*([0-9]+(?:\.[0-9]+)?)",
+                line,
+                re.IGNORECASE,
+            )
+            if price_match and competitor_name:
+                price_value = float(price_match.group(1))
+                competitor_data.append(
+                    {"Competitor": competitor_name, "Price ($)": price_value}
+                )
+                competitor_name = None
+
+# 3️⃣ Final fallback if nothing parsed at all
 if not competitor_data:
     competitor_data = [
         {"Competitor": "HydraSmart Bottle", "Price ($)": 799},
@@ -160,13 +192,8 @@ if not competitor_data:
         {"Competitor": product_name, "Price ($)": 1099},
     ]
 
-# Debug: show parsed competitor_data
-st.write("🛠 Parsed competitor_data (debug):", competitor_data)
-
-# ---- Build DataFrame ----
 df_price = pd.DataFrame(competitor_data)
 
-# ---- Plot chart ----
 fig2 = px.bar(
     df_price,
     x="Competitor",
@@ -176,7 +203,6 @@ fig2 = px.bar(
     title=f"Price Comparison: {product_name} vs Competitors",
     color_discrete_sequence=px.colors.qualitative.Safe,
 )
-
 st.plotly_chart(fig2, use_container_width=True)
 
 # ==========================================
