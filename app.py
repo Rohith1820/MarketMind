@@ -45,7 +45,11 @@ os.makedirs(output_dir, exist_ok=True)
 # ==========================================
 if st.button("🚀 Run Market Research Analysis"):
     with st.spinner("Running AI-driven market analysis... please wait 1–2 minutes."):
-
+       
+        if os.path.exists(output_dir):
+          shutil.rmtree(output_dir)
+        os.makedirs(output_dir, exist_ok=True)
+       
         os.environ["PRODUCT_NAME"] = product_name
         os.environ["INDUSTRY"] = industry
         os.environ["GEOGRAPHY"] = geography
@@ -114,6 +118,7 @@ st.plotly_chart(fig1, use_container_width=True)
 # ==========================================
 # 💰 Competitor Pricing (Dynamic if available)
 # ==========================================
+
 st.subheader("💰 Competitor Pricing Overview")
 
 pricing_file = os.path.join(output_dir, "competitor_analysis.md")
@@ -125,21 +130,26 @@ if os.path.exists(pricing_file):
         lines = f.readlines()
 
     competitor_name = None
-    price_value = None
 
     for line in lines:
-
-        # Detect competitor header
-        header_match = re.search(r"### Competitor:\s*\*\*(.*?)\*\*", line)
+        # Try to detect a competitor name in a heading-like line
+        header_match = re.search(
+            r"(?:^|\#\#\#\s*)Competitor[:\-\s]*\**(.+?)\**\s*$",
+            line,
+            re.IGNORECASE,
+        )
         if header_match:
             competitor_name = header_match.group(1).strip()
-            price_value = None  # reset
             continue
 
-        # Detect price line
-        price_match = re.search(r"Price:\s*\$([0-9]+)", line)
+        # Try to detect a price on a nearby line
+        price_match = re.search(
+            r"price[^$0-9]*\$?\s*([0-9]+(?:\.[0-9]+)?)",
+            line,
+            re.IGNORECASE,
+        )
         if price_match and competitor_name:
-            price_value = int(price_match.group(1))
+            price_value = float(price_match.group(1))
             competitor_data.append(
                 {"Competitor": competitor_name, "Price ($)": price_value}
             )
@@ -151,7 +161,7 @@ if not competitor_data:
         {"Competitor": "HydraSmart Bottle", "Price ($)": 799},
         {"Competitor": "PureSip Tech Flask", "Price ($)": 699},
         {"Competitor": "SmartHydrate 2.0", "Price ($)": 999},
-        {"Competitor": product_name, "Price ($)": 1099}
+        {"Competitor": product_name, "Price ($)": 1099},
     ]
 
 # ---- Build DataFrame ----
