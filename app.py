@@ -1,12 +1,11 @@
+import os
+import shutil
+import subprocess
+import re
 
 import pandas as pd
-import matplotlib.pyplot as plt
 import plotly.express as px
 import streamlit as st
-import os
-import subprocess
-import shutil
-import re
 
 # ==========================================
 # ⚙️ Streamlit Page Configuration
@@ -33,11 +32,9 @@ with st.expander("⚙️ Configure Product Details", expanded=True):
         scale = st.selectbox("Business Scale", ["Startup", "SME", "Enterprise"], index=1)
 
 # ==========================================
-# 🧹 Prepare Output Folder
+# 🧹 Prepare Output Folder (DO NOT DELETE ON EVERY RERUN)
 # ==========================================
 output_dir = "outputs"
-if os.path.exists(output_dir):
-    shutil.rmtree(output_dir)
 os.makedirs(output_dir, exist_ok=True)
 
 # ==========================================
@@ -45,11 +42,12 @@ os.makedirs(output_dir, exist_ok=True)
 # ==========================================
 if st.button("🚀 Run Market Research Analysis"):
     with st.spinner("Running AI-driven market analysis... please wait 1–2 minutes."):
-       
+
+        # 🔄 Clear old outputs ONLY when starting a new analysis
         if os.path.exists(output_dir):
-          shutil.rmtree(output_dir)
+            shutil.rmtree(output_dir)
         os.makedirs(output_dir, exist_ok=True)
-       
+
         os.environ["PRODUCT_NAME"] = product_name
         os.environ["INDUSTRY"] = industry
         os.environ["GEOGRAPHY"] = geography
@@ -58,11 +56,15 @@ if st.button("🚀 Run Market Research Analysis"):
         process = subprocess.run(
             ["python3", "main.py"],
             text=True,
-            capture_output=True
+            capture_output=True,
         )
 
         if process.returncode != 0:
             st.error("❌ Error running analysis. Check logs in main.py.")
+            # Show logs to debug on Render
+            with st.expander("🔍 Debug logs", expanded=False):
+                st.text("STDOUT:\n" + process.stdout)
+                st.text("\nSTDERR:\n" + process.stderr)
         else:
             st.success(f"✅ Analysis completed successfully for **{product_name}**!")
 
@@ -89,10 +91,10 @@ def extract_sentiment_summary(file_path):
 # ==========================================
 st.subheader("💬 Customer Sentiment Overview")
 
-pos, neg, neu = extract_sentiment_summary("outputs/review_sentiment.md")
+pos, neg, neu = extract_sentiment_summary(os.path.join(output_dir, "review_sentiment.md"))
 df_sentiment = pd.DataFrame({
     "Sentiment": ["Positive", "Negative", "Neutral"],
-    "Percentage": [pos, neg, neu]
+    "Percentage": [pos, neg, neu],
 })
 
 fig1 = px.pie(
@@ -105,8 +107,8 @@ fig1 = px.pie(
     color_discrete_map={
         "Positive": "#2ecc71",
         "Negative": "#e74c3c",
-        "Neutral": "#95a5a6"
-    }
+        "Neutral": "#95a5a6",
+    },
 )
 
 fig1.update_traces(textinfo="percent+label", pull=[0.02, 0.05, 0])
@@ -114,40 +116,34 @@ fig1.update_layout(title_x=0.5)
 
 st.plotly_chart(fig1, use_container_width=True)
 
-
 # ==========================================
 # 💰 Competitor Pricing (Dynamic if available)
 # ==========================================
-
 st.subheader("💰 Competitor Pricing Overview")
 
 pricing_file = os.path.join(output_dir, "competitor_analysis.md")
 competitor_data = []
 
-# ---- Extract competitors from markdown if available ----
+# ---- Debug: show raw competitor_analysis.md to ensure Render sees it ----
 if os.path.exists(pricing_file):
     with open(pricing_file, "r", encoding="utf-8") as f:
-        lines = f.readlines()
+        raw_md = f.read()
+    with st.expander("🛠 Raw competitor_analysis.md (debug)", expanded=False):
+        st.text(raw_md)
 
+    # ---- Extract competitors from markdown if available ----
+    lines = raw_md.splitlines()
     competitor_name = None
 
     for line in lines:
-        # Try to detect a competitor name in a heading-like line
-        header_match = re.search(
-            r"(?:^|\#\#\#\s*)Competitor[:\-\s]*\**(.+?)\**\s*$",
-            line,
-            re.IGNORECASE,
-        )
+        # Detect competitor header like: "### Competitor: **Name**"
+        header_match = re.search(r"###\s*Competitor[:\-\s]*\**(.+?)\**\s*$", line, re.IGNORECASE)
         if header_match:
             competitor_name = header_match.group(1).strip()
             continue
 
-        # Try to detect a price on a nearby line
-        price_match = re.search(
-            r"price[^$0-9]*\$?\s*([0-9]+(?:\.[0-9]+)?)",
-            line,
-            re.IGNORECASE,
-        )
+        # Detect a price anywhere on subsequent line: "Price: $123" or similar
+        price_match = re.search(r"price[^$0-9]*\$?\s*([0-9]+(?:\.[0-9]+)?)", line, re.IGNORECASE)
         if price_match and competitor_name:
             price_value = float(price_match.group(1))
             competitor_data.append(
@@ -164,6 +160,9 @@ if not competitor_data:
         {"Competitor": product_name, "Price ($)": 1099},
     ]
 
+# Debug: show parsed competitor_data
+st.write("🛠 Parsed competitor_data (debug):", competitor_data)
+
 # ---- Build DataFrame ----
 df_price = pd.DataFrame(competitor_data)
 
@@ -175,7 +174,7 @@ fig2 = px.bar(
     color="Competitor",
     text="Price ($)",
     title=f"Price Comparison: {product_name} vs Competitors",
-    color_discrete_sequence=px.colors.qualitative.Safe
+    color_discrete_sequence=px.colors.qualitative.Safe,
 )
 
 st.plotly_chart(fig2, use_container_width=True)
@@ -193,7 +192,7 @@ radar_data = pd.DataFrame({
     "Feature": ["Design", "Performance", "Battery", "Integration", "Price Value"],
     product_name: [9, 8, 7, 9, 6],
     competitors[0]: [8, 7, 6, 7, 7],
-    competitors[1]: [7, 6, 8, 6, 8]
+    competitors[1]: [7, 6, 8, 6, 8],
 })
 
 fig3 = px.line_polar(
@@ -203,10 +202,10 @@ fig3 = px.line_polar(
     color="Product",
     line_close=True,
     template="plotly_white",
-    title=f"Feature Comparison: {product_name} vs {competitors[0]}, {competitors[1]}"
+    title=f"Feature Comparison: {product_name} vs {competitors[0]}, {competitors[1]}",
 )
 
-fig3.update_traces(fill='toself', opacity=0.6)
+fig3.update_traces(fill="toself", opacity=0.6)
 fig3.update_layout(title_x=0.5)
 
 st.plotly_chart(fig3, use_container_width=True)
@@ -217,47 +216,43 @@ st.plotly_chart(fig3, use_container_width=True)
 st.subheader("📈 Market Growth Trend (2023–2026)")
 
 market_trend = pd.DataFrame({
-    "Year": ["2023", "2024", "2025", "2026"],  # <-- string years remove midpoints
+    "Year": ["2023", "2024", "2025", "2026"],
     "Market Growth (%)": [12, 18, 24, 33],
 })
 
-# Calculate upper confidence band (12% above)
 market_trend["Upper Bound"] = market_trend["Market Growth (%)"] * 1.12
 
-# Main line chart
 fig_trend = px.line(
     market_trend,
     x="Year",
     y="Market Growth (%)",
     title=f"Projected Market Growth in {industry}",
     markers=True,
-    color_discrete_sequence=["#1ABC9C"]
+    color_discrete_sequence=["#1ABC9C"],
 )
 
-# Add only the upper shaded band
 fig_trend.add_traces(px.area(
     market_trend,
     x="Year",
-    y="Upper Bound"
+    y="Upper Bound",
 ).update_traces(
-    fill='tonexty',
-    fillcolor='rgba(26, 188, 156, 0.18)',
-    line=dict(color='rgba(0,0,0,0)')
+    fill="tonexty",
+    fillcolor="rgba(26, 188, 156, 0.18)",
+    line=dict(color="rgba(0,0,0,0)"),
 ).data)
 
-# Final formatting
 fig_trend.update_layout(
     xaxis_title="Year",
     yaxis_title="Market Growth (%)",
     xaxis=dict(
-        type='category',          # <-- prevents midpoints
-        tickmode='array',
+        type="category",
+        tickmode="array",
         tickvals=market_trend["Year"],
-        ticktext=market_trend["Year"]
+        ticktext=market_trend["Year"],
     ),
     showlegend=False,
     plot_bgcolor="white",
-    margin=dict(l=40, r=30, t=60, b=40)
+    margin=dict(l=40, r=30, t=60, b=40),
 )
 
 st.plotly_chart(fig_trend, use_container_width=True)
@@ -296,7 +291,6 @@ else:
 # 📘 Sidebar — How to Use
 # ==========================================
 st.sidebar.header("ℹ️ How to Use MarketMind")
-
 st.sidebar.markdown("""
 ### 📌 Steps to Run the Analysis
 
@@ -311,3 +305,5 @@ st.sidebar.markdown("""
 - Try different industries to get different competitor profiles.  
 - Use reports directly in presentations or decks.  
 """)
+
+
