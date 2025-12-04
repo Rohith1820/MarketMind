@@ -4,20 +4,10 @@ from agents import MarketResearchAgents
 from tasks import MarketResearchTasks
 from tools.feature_comparison import FeatureComparisonTool
 
-import os
-import glob
-
-output_dir = "outputs"
-os.makedirs(output_dir, exist_ok=True)
-
-# Delete only markdown reports, not the whole folder
-for f in glob.glob(os.path.join(output_dir, "*.md")):
-    os.remove(f)
-
-print("🧹 Cleaned old markdown reports in outputs/ ✅")
-
-
-
+ # Clear old outputs ONLY when starting a new analysis
+        if os.path.exists(output_dir):
+            shutil.rmtree(output_dir)
+        os.makedirs(output_dir, exist_ok=True)
 def run():
     # 1️⃣ Configuration
     product_name = os.getenv("PRODUCT_NAME", "EcoWave Smart Bottle")
