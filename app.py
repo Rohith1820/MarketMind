@@ -41,13 +41,13 @@ with st.expander("⚙️ Configure Product Details", expanded=True):
         industry = st.text_input("Industry", "Consumer Goods")
         scale = st.selectbox("Business Scale", ["Startup", "SME", "Enterprise"], index=1)
 
+
 # ==========================================
 # 🔧 Helper functions
 # ==========================================
 def extract_sentiment_summary(file_path: str):
     """Parse outputs/review_sentiment.md for Positive/Negative/Neutral %."""
     default = (60, 30, 10)
-
     if not os.path.exists(file_path):
         return default
 
@@ -68,43 +68,16 @@ def extract_sentiment_summary(file_path: str):
     return pos, neg, neu
 
 
-def clean_competitor_name(name: str) -> str:
-    """Strip 'Company:', markdown, and extra description from names."""
-    if not isinstance(name, str):
-        name = str(name)
-
-    # remove markdown bold and heading symbols
-    name = name.replace("**", "")
-    name = re.sub(r"^[#\-\*\d\.\)\s]+", "", name)
-
-    # remove obvious prefixes
-    name = re.sub(r"(?i)company\s*name[:\-]*", "", name)
-    name = re.sub(r"(?i)company[:\-]*", "", name)
-    name = re.sub(r"(?i)competitor[:\-]*", "", name)
-
-    # drop bracketed / parenthesized extra info
-    name = re.sub(r"\[.*?\]", "", name)
-    name = re.sub(r"\(.*?\)", "", name)
-
-    # keep only the left side of separators
-    if "|" in name:
-        name = name.split("|")[0]
-    if " - " in name:
-        name = name.split(" - ")[0]
-
-    return name.strip(" :-").strip()
-
-
-def parse_competitors_from_markdown(pricing_file: str, product_name: str) -> pd.DataFrame:
+def parse_competitors_from_markdown(pricing_file: str, product_name: str):
     """
-    Safer parser for outputs/competitor_analysis.md.
+    Improved parser for outputs/competitor_analysis.md.
 
     Strategy:
-      - Track a current competitor name whenever we see:
-        * '### Competitor: ...'    OR
-        * 'Company: ...'
-      - Only treat lines that contain the word 'Price' as pricing lines.
-      - Ignore any other numeric lines (weakness scores, bullets, etc).
+    - Only look at lines that clearly talk about *price*.
+    - Extract the numeric value on that line.
+    - Use the nearest non-empty line *above* it as the competitor name.
+    - Clean markdown bullets/headings and 'Company:' / 'Brand:' / 'Competitor:' text.
+    - Ignore generic lines like 'Weaknesses', 'Key Strengths', etc.
     """
     rows = []
 
@@ -115,66 +88,100 @@ def parse_competitors_from_markdown(pricing_file: str, product_name: str) -> pd.
         except Exception:
             lines = []
 
-        current_name = None
+        for i, line in enumerate(lines):
+            line_lower = line.lower()
 
-        for raw in lines:
-            line = raw.strip()
-
-            if not line:
+            # Only consider lines that explicitly mention price
+            if "price" not in line_lower:
                 continue
 
-            # --- detect competitor headers ---
-            # e.g. "### Competitor: **Company: Hidrate Inc.**"
-            header_match = re.search(r"^#{1,6}\s*Competitor:\s*(.*)", line, re.IGNORECASE)
-            if header_match:
-                current_name = clean_competitor_name(header_match.group(1))
-                continue
-
-            # e.g. "Company: Hidrate Inc."
-            company_match = re.search(r"(?i)^company\s*:\s*(.+)", line)
-            if company_match:
-                current_name = clean_competitor_name(company_match.group(1))
-                continue
-
-            # --- detect price lines (must contain 'price') ---
+            # Find a numeric price on this line
             price_match = re.search(
-                r"(?i)price[^0-9\$]*([\$₹]?\s*([0-9][0-9,\.]*))", line
+                r"([₹$]|rs\.?\s*)?([0-9][0-9,\.]*)", line, re.IGNORECASE
             )
-            if price_match and current_name:
-                num_str = price_match.group(2).replace(",", "")
-                try:
-                    price_value = float(num_str)
-                except ValueError:
-                    continue
+            if not price_match:
+                continue
 
-                rows.append(
-                    {"Competitor": current_name, "Price ($)": price_value}
-                )
-                # don't clear current_name; we might have other info below
+            price_str = price_match.group(2)
+            price_clean = price_str.replace(",", "")
+            try:
+                price_value = float(price_clean)
+            except ValueError:
+                continue
+
+            # Optional: ignore obviously non-price tiny numbers (e.g., ratings 1–5)
+            if price_value < 5:
+                continue
+
+            # Walk backwards to find the nearest non-empty line for the name
+            header = None
+            j = i - 1
+            while j >= 0:
+                cand = lines[j].strip()
+                if cand:
+                    header = cand
+                    break
+                j -= 1
+
+            if not header:
+                continue
+
+            # Clean header into a name
+            name = header
+
+            # remove leading markdown bullets/headings/numbers
+            name = re.sub(r"^[#\-\*\d\.\)\s]+", "", name)
+            # remove bold markers
+            name = name.replace("**", "")
+            # remove common labels
+            name = re.sub(r"(?i)\b(company|brand|competitor)[:\-]*", "", name).strip()
+            # final cleanup
+            name = name.strip(":- ").strip()
+
+            lowered = name.lower()
+
+            # Filter out obviously non-name lines
+            bad_tokens = [
+                "strength",
+                "weakness",
+                "feature",
+                "tracking",
+                "overview",
+                "market",
+                "segment",
+                "insight",
+                "design",
+                "bottle market",
+            ]
+            if any(tok in lowered for tok in bad_tokens):
+                continue
+
+            # Avoid absurdly long "names" which are actually sentences
+            if len(name.split()) > 6:
+                continue
+
+            if not name:
+                continue
+
+            rows.append({"Competitor": name, "Price ($)": price_value})
 
     # Fallback if nothing parsed
     if not rows:
         rows = [
-            {"Competitor": "HydraSmart Bottle", "Price ($)": 79.0},
-            {"Competitor": "PureSip Tech Flask", "Price ($)": 69.0},
-            {"Competitor": "SmartHydrate 2.0", "Price ($)": 99.0},
-            {"Competitor": product_name, "Price ($)": 109.0},
+            {"Competitor": "HydraSmart Bottle", "Price ($)": 79.95},
+            {"Competitor": "PureSip Tech Flask", "Price ($)": 69.00},
+            {"Competitor": "SmartHydrate 2.0", "Price ($)": 99.00},
+            {"Competitor": product_name, "Price ($)": 89.00},
         ]
 
-    df = pd.DataFrame(rows)
+    return pd.DataFrame(rows)
 
-    # final clean + de-duplicate + cap to 5 competitors
-    df["Competitor"] = df["Competitor"].astype(str).apply(clean_competitor_name)
-    df = df.drop_duplicates(subset=["Competitor"]).head(5)
-
-    return df
 
 # ==========================================
 # 🚀 Run Market Research Analysis
 # ==========================================
 if st.button("🚀 Run Market Research Analysis"):
     with st.spinner("Running AI-driven market analysis... please wait 1–2 minutes."):
-
         # 🧹 ONLY clear outputs when the button is clicked
         if os.path.exists(OUTPUT_DIR):
             shutil.rmtree(OUTPUT_DIR)
@@ -196,7 +203,9 @@ if st.button("🚀 Run Market Research Analysis"):
 
         if process.returncode != 0:
             st.session_state["analysis_done"] = False
-            st.error("❌ Error running analysis. Check Railway logs and stdout/stderr.")
+            st.error(
+                "❌ Error running analysis. Check Railway logs and stdout/stderr."
+            )
             st.code(process.stderr or process.stdout or "No output", language="bash")
         else:
             st.session_state["analysis_done"] = True
@@ -253,7 +262,7 @@ fig2 = px.bar(
 )
 st.plotly_chart(fig2, use_container_width=True)
 
-# Optional: show parsed table for debugging
+# Optional: show parsed table for inspection
 with st.expander("🔍 Parsed competitor data"):
     st.dataframe(df_price)
 
@@ -336,6 +345,7 @@ st.plotly_chart(fig_trend, use_container_width=True)
 # 📊 Key Market Indicators (Dynamic)
 # ==========================================
 st.subheader("📊 Key Market Indicators")
+
 col1, col2, col3 = st.columns(3)
 col1.metric("Positive Sentiment", f"{pos}%", "↑ vs last month")
 col2.metric("Negative Sentiment", f"{neg}%", "↓ slightly")
@@ -367,16 +377,17 @@ else:
 # 📘 Sidebar — How to Use
 # ==========================================
 st.sidebar.header("ℹ️ How to Use MarketMind")
-st.sidebar.markdown("""
+st.sidebar.markdown(
+    """
 ### 📌 Steps to Run the Analysis
-
-1. **Enter your product details**  
-2. **Click 'Run Market Research Analysis'**  
-3. Dashboard visuals update automatically  
-4. Scroll down to view the detailed markdown reports  
+1. **Enter your product details**
+2. **Click 'Run Market Research Analysis'**
+3. Dashboard visuals update automatically
+4. Scroll down to view the detailed markdown reports
 
 ---
 ### 💡 Tips
-- Try different industries to see different competitor profiles.  
-- Use reports directly in presentations or decks.  
-""")
+- Try different industries to see different competitor profiles.
+- Use reports directly in presentations or decks.
+"""
+)
