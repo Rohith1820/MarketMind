@@ -70,12 +70,18 @@ def extract_sentiment_summary(file_path: str):
 def clean_competitor_label(name: str) -> str:
     """
     Clean raw header text into a short competitor name.
-    Examples:
-      "Company name: Enviva Partners, LP | Largest global supplier"
-        -> "Enviva Partners, LP"
+    Also strips weird tokens like [company:xxxxx].
     """
-    # Remove leading "Company name:" (case-insensitive)
-    name = re.sub(r"(?i)company\s*name[:\-]*", "", name).strip()
+    if not isinstance(name, str):
+        name = str(name)
+
+    # Remove bracketed/parenthesized junk like [company:xxx], (details...)
+    name = re.sub(r"\[.*?\]", "", name)
+    name = re.sub(r"\(.*?\)", "", name)
+
+    # Remove leading "Company name:" or "Company:"
+    name = re.sub(r"(?i)company\s*name[:\-]*", "", name)
+    name = re.sub(r"(?i)company[:\-]*", "", name)
 
     # If there is extra description separated by "|", keep only the first part
     if "|" in name:
@@ -85,7 +91,7 @@ def clean_competitor_label(name: str) -> str:
     if " - " in name:
         name = name.split(" - ")[0].strip()
 
-    return name
+    return name.strip()
 
 
 def parse_competitors_from_markdown(pricing_file: str, product_name: str) -> pd.DataFrame:
@@ -96,6 +102,7 @@ def parse_competitors_from_markdown(pricing_file: str, product_name: str) -> pd.
       - Look for any numeric value on a line (price).
       - Use the nearest non-empty line *above* it as competitor name.
       - Clean markdown bullets/headings and 'Competitor:' / 'Company name:' text.
+      - Limit to max 5 competitors.
     """
     rows = []
 
@@ -105,9 +112,9 @@ def parse_competitors_from_markdown(pricing_file: str, product_name: str) -> pd.
                 lines = f.readlines()
         except Exception:
             lines = []
-        # iterate over lines looking for prices
+
         for i, line in enumerate(lines):
-            # find a numeric price on this line
+            # Find a numeric price on this line
             price_match = re.search(r"([₹$]|rs\.?\s*)?([0-9][0-9,\.]*)", line, re.IGNORECASE)
             if not price_match:
                 continue
@@ -119,7 +126,7 @@ def parse_competitors_from_markdown(pricing_file: str, product_name: str) -> pd.
             except ValueError:
                 continue
 
-            # walk backwards to find nearest non-empty line: header/name
+            # Walk backwards to find nearest non-empty line: header/name
             header = None
             j = i - 1
             while j >= 0:
@@ -132,22 +139,25 @@ def parse_competitors_from_markdown(pricing_file: str, product_name: str) -> pd.
             if not header:
                 continue
 
-            # clean markdown header into a name
+            # Clean markdown header into a name
             name = header
-            # remove leading markdown bullets/headings/numbers
+            # Remove leading markdown bullets/headings/numbers
             name = re.sub(r"^[#\-\*\d\.\)\s]+", "", name)
-            # remove bold markers
+            # Remove bold markers
             name = name.replace("**", "")
-            # remove 'Competitor' label if present
+            # Remove 'Competitor' label if present
             name = re.sub(r"(?i)competitor[:\-]*", "", name).strip()
-            # final cleanup of punctuation
+            # Final trim
             name = name.strip(":- ").strip()
 
             if not name:
                 continue
 
-            # extra cleanup for "Company name: X | ..." style
+            # Extra cleanup for company labels, brackets, etc.
             name = clean_competitor_label(name)
+
+            if not name:
+                continue
 
             rows.append({"Competitor": name, "Price ($)": price_value})
 
@@ -161,8 +171,14 @@ def parse_competitors_from_markdown(pricing_file: str, product_name: str) -> pd.
         ]
 
     df = pd.DataFrame(rows)
-    # final safety pass on labels
+
+    # Final safety pass on labels
     df["Competitor"] = df["Competitor"].astype(str).apply(clean_competitor_label)
+
+    # ✅ Limit to at most 5 competitors
+    if len(df) > 5:
+        df = df.head(5)
+
     return df
 
 # ==========================================
@@ -353,29 +369,4 @@ if os.path.exists(OUTPUT_DIR):
 
     if md_files:
         for md_file in md_files:
-            with open(os.path.join(OUTPUT_DIR, md_file), "r", encoding="utf-8") as f:
-                content = f.read()
-            with st.expander(f"📄 {md_file}", expanded=False):
-                st.markdown(content)
-    else:
-        st.info("⚠️ No markdown reports found. Please run analysis first.")
-else:
-    st.warning("Outputs directory not found. Please run analysis.")
-
-# ==========================================
-# 📘 Sidebar — How to Use
-# ==========================================
-st.sidebar.header("ℹ️ How to Use MarketMind")
-st.sidebar.markdown("""
-### 📌 Steps to Run the Analysis
-
-1. **Enter your product details**  
-2. **Click 'Run Market Research Analysis'**  
-3. Dashboard visuals update automatically  
-4. Scroll down to view the detailed markdown reports  
-
----
-### 💡 Tips
-- Try different industries to see different competitor profiles.  
-- Use reports directly in presentations or decks.  
-""")
+            with open(os.path.join(OUTPUT_DIR, md_file), "r",
