@@ -48,83 +48,81 @@ if "last_product_name" not in st.session_state:
 def build_competitor_df(output_dir: str, product_name: str) -> pd.DataFrame:
     """
     Parse outputs/competitor_analysis.md to extract competitor names & prices.
-    Falls back to a default list if parsing fails or file missing.
+
+    Very tolerant:
+    - Looks for any line containing a price (₹, $, Rs, etc.)
+    - Takes the closest non-empty line *above* that price as the competitor name
+    - Strips markdown bullets/headings like '###', '-', '*', '1.' etc.
+    Falls back to default examples if nothing could be parsed.
     """
     pricing_file = os.path.join(output_dir, "competitor_analysis.md")
-    competitor_data = []
+    competitor_rows = []
 
     if os.path.exists(pricing_file):
         with open(pricing_file, "r", encoding="utf-8") as f:
             lines = f.readlines()
 
-        competitor_name = None
-
-        for line in lines:
-            # Example expected format:
-            # ### Competitor: **Brand X**
-            header_match = re.search(r"###\s*Competitor:\s*\*\*(.*?)\*\*", line)
-            if header_match:
-                competitor_name = header_match.group(1).strip()
+        for i, line in enumerate(lines):
+            # Try to detect a numeric price on this line
+            # Examples it will match:
+            #   "- Price: $999"
+            #   "Price: ₹ 1,299"
+            #   "Price - 899"
+            price_match = re.search(r"([0-9][0-9,\.]*)", line)
+            if not price_match:
                 continue
 
-            # Example expected format:
-            # - Price: $999
-            price_match = re.search(r"Price:\s*\$([0-9]+)", line)
-            if price_match and competitor_name:
-                price_value = int(price_match.group(1))
-                competitor_data.append(
-                    {"Competitor": competitor_name, "Price ($)": price_value}
-                )
-                competitor_name = None  # reset for the next block
+            price_str = price_match.group(1)
+            price_str_clean = price_str.replace(",", "")
+            try:
+                price_value = int(float(price_str_clean))
+            except ValueError:
+                continue  # skip weird numbers
+
+            # Walk backwards to find the nearest non-empty line = competitor name
+            header_line = None
+            j = i - 1
+            while j >= 0:
+                candidate = lines[j].strip()
+                if candidate:  # non-empty
+                    header_line = candidate
+                    break
+                j -= 1
+
+            if not header_line:
+                continue
+
+            # Clean markdown syntax from the competitor name
+            name = header_line
+
+            # Remove markdown bullets / heading markers / list indices
+            # e.g. "### Competitor: **Brand X**" -> "Competitor: **Brand X**"
+            name = re.sub(r"^[#\-\*\d\.\)\s]+", "", name)
+            # Remove bold markers
+            name = name.replace("**", "")
+            # Remove the word 'Competitor' if present
+            name = re.sub(r"(?i)competitor[:\-]*", "", name).strip()
+
+            # Final cleanup
+            name = name.strip(":- ").strip()
+
+            if not name:
+                continue
+
+            competitor_rows.append(
+                {"Competitor": name, "Price ($)": price_value}
+            )
 
     # Fallback if nothing parsed
-    if not competitor_data:
-        competitor_data = [
+    if not competitor_rows:
+        competitor_rows = [
             {"Competitor": "HydraSmart Bottle", "Price ($)": 799},
             {"Competitor": "PureSip Tech Flask", "Price ($)": 699},
             {"Competitor": "SmartHydrate 2.0", "Price ($)": 999},
             {"Competitor": product_name, "Price ($)": 1099},
         ]
 
-    return pd.DataFrame(competitor_data)
-
-
-def extract_sentiment_summary(sentiment_file: str):
-    """
-    Parse outputs/review_sentiment.md to get positive/negative/neutral percentages.
-    Falls back to (60, 30, 10) if parsing fails.
-    """
-    default = (60, 30, 10)
-
-    if not os.path.exists(sentiment_file):
-        return default
-
-    with open(sentiment_file, "r", encoding="utf-8") as f:
-        text = f.read()
-
-    # Try some flexible regex patterns
-    pos_match = re.search(r"Positive[^0-9]*([0-9]+)", text, re.IGNORECASE)
-    neg_match = re.search(r"Negative[^0-9]*([0-9]+)", text, re.IGNORECASE)
-    neu_match = re.search(r"Neutral[^0-9]*([0-9]+)", text, re.IGNORECASE)
-
-    try:
-        pos = int(pos_match.group(1)) if pos_match else default[0]
-        neg = int(neg_match.group(1)) if neg_match else default[1]
-        neu = int(neu_match.group(1)) if neu_match else default[2]
-    except Exception:
-        return default
-
-    total = pos + neg + neu
-    if total == 0:
-        return default
-
-    # Normalize to percentages (just in case)
-    pos = round(100 * pos / total)
-    neg = round(100 * neg / total)
-    neu = 100 - pos - neg  # ensure sum=100
-
-    return (pos, neg, neu)
-
+    return pd.DataFrame(competitor_rows)
 
 # ==========================================
 # 🎛️ User Inputs
