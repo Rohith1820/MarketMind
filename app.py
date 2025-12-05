@@ -1,11 +1,11 @@
+import os
+import re
+import shutil
+import subprocess
+
 import pandas as pd
-import matplotlib.pyplot as plt
 import plotly.express as px
 import streamlit as st
-import os
-import subprocess
-import shutil
-import re
 
 # ==========================================
 # ⚙️ Streamlit Page Configuration
@@ -14,160 +14,261 @@ st.set_page_config(page_title="MarketMind Dashboard", layout="wide")
 st.title("🧠 MarketMind: AI Market Research Assistant")
 st.header("📊 MarketMind Insights Dashboard")
 
-st.markdown("""
+st.markdown(
+    """
 MarketMind generates **AI-driven market research reports** and dynamic dashboards —
-including competitor intelligence, sentiment insights, and growth projections.
-""")
+including competitor intelligence, sentiment insights, and growth opportunities —
+based on the product and market context you provide.
+"""
+)
 
 # ==========================================
-# 🧩 Product Configuration Section
+# 📂 Paths & Session State
 # ==========================================
-with st.expander("⚙️ Configure Product Details", expanded=True):
-    col1, col2 = st.columns(2)
-    with col1:
-        product_name = st.text_input("Enter Product Name", "EcoWave Smart Bottle")
-        geography = st.text_input("Target Geography", "Global")
-    with col2:
-        industry = st.text_input("Industry", "Consumer Goods")
-        scale = st.selectbox("Business Scale", ["Startup", "SME", "Enterprise"], index=1)
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+OUTPUT_DIR = os.path.join(BASE_DIR, "outputs")
+
+if "run_ok" not in st.session_state:
+    st.session_state["run_ok"] = False
+
+if "df_price" not in st.session_state:
+    st.session_state["df_price"] = None
+
+if "sentiment" not in st.session_state:
+    # (pos, neg, neu)
+    st.session_state["sentiment"] = (60, 30, 10)
+
+if "last_product_name" not in st.session_state:
+    st.session_state["last_product_name"] = ""
+
 
 # ==========================================
-# 🧹 Prepare Output Folder
+# 🔧 Helper Functions
 # ==========================================
-output_dir = "outputs"
-if os.path.exists(output_dir):
-    shutil.rmtree(output_dir)
-os.makedirs(output_dir, exist_ok=True)
+def build_competitor_df(output_dir: str, product_name: str) -> pd.DataFrame:
+    """
+    Parse outputs/competitor_analysis.md to extract competitor names & prices.
+    Falls back to a default list if parsing fails or file missing.
+    """
+    pricing_file = os.path.join(output_dir, "competitor_analysis.md")
+    competitor_data = []
+
+    if os.path.exists(pricing_file):
+        with open(pricing_file, "r", encoding="utf-8") as f:
+            lines = f.readlines()
+
+        competitor_name = None
+
+        for line in lines:
+            # Example expected format:
+            # ### Competitor: **Brand X**
+            header_match = re.search(r"###\s*Competitor:\s*\*\*(.*?)\*\*", line)
+            if header_match:
+                competitor_name = header_match.group(1).strip()
+                continue
+
+            # Example expected format:
+            # - Price: $999
+            price_match = re.search(r"Price:\s*\$([0-9]+)", line)
+            if price_match and competitor_name:
+                price_value = int(price_match.group(1))
+                competitor_data.append(
+                    {"Competitor": competitor_name, "Price ($)": price_value}
+                )
+                competitor_name = None  # reset for the next block
+
+    # Fallback if nothing parsed
+    if not competitor_data:
+        competitor_data = [
+            {"Competitor": "HydraSmart Bottle", "Price ($)": 799},
+            {"Competitor": "PureSip Tech Flask", "Price ($)": 699},
+            {"Competitor": "SmartHydrate 2.0", "Price ($)": 999},
+            {"Competitor": product_name, "Price ($)": 1099},
+        ]
+
+    return pd.DataFrame(competitor_data)
+
+
+def extract_sentiment_summary(sentiment_file: str):
+    """
+    Parse outputs/review_sentiment.md to get positive/negative/neutral percentages.
+    Falls back to (60, 30, 10) if parsing fails.
+    """
+    default = (60, 30, 10)
+
+    if not os.path.exists(sentiment_file):
+        return default
+
+    with open(sentiment_file, "r", encoding="utf-8") as f:
+        text = f.read()
+
+    # Try some flexible regex patterns
+    pos_match = re.search(r"Positive[^0-9]*([0-9]+)", text, re.IGNORECASE)
+    neg_match = re.search(r"Negative[^0-9]*([0-9]+)", text, re.IGNORECASE)
+    neu_match = re.search(r"Neutral[^0-9]*([0-9]+)", text, re.IGNORECASE)
+
+    try:
+        pos = int(pos_match.group(1)) if pos_match else default[0]
+        neg = int(neg_match.group(1)) if neg_match else default[1]
+        neu = int(neu_match.group(1)) if neu_match else default[2]
+    except Exception:
+        return default
+
+    total = pos + neg + neu
+    if total == 0:
+        return default
+
+    # Normalize to percentages (just in case)
+    pos = round(100 * pos / total)
+    neg = round(100 * neg / total)
+    neu = 100 - pos - neg  # ensure sum=100
+
+    return (pos, neg, neu)
+
+
+# ==========================================
+# 🎛️ User Inputs
+# ==========================================
+st.sidebar.header("🧾 Input: Product & Market Context")
+
+product_name = st.sidebar.text_input(
+    "Product Name",
+    value="Smart Hydration Bottle",
+    help="Name of the product you want to analyze.",
+)
+
+industry = st.sidebar.text_input(
+    "Industry / Category",
+    value="Smart consumer electronics",
+    help="e.g., energy drink, smart bottle, skincare serum, etc.",
+)
+
+geography = st.sidebar.text_input(
+    "Target Geography / Region",
+    value="United States",
+    help="e.g., India, North America, EU, etc.",
+)
+
+scale = st.sidebar.selectbox(
+    "Business Scale",
+    options=["Startup", "SMB", "Enterprise"],
+    index=0,
+)
+
+st.sidebar.markdown(
+    "Click **Run Market Research Analysis** after updating these fields."
+)
 
 # ==========================================
 # 🚀 Run Market Research Analysis
 # ==========================================
-if st.button("🚀 Run Market Research Analysis"):
-    with st.spinner("Running AI-driven market analysis... please wait 1–2 minutes."):
+st.markdown("---")
+st.subheader("🚀 Run AI Market Research Pipeline")
 
-        os.environ["PRODUCT_NAME"] = product_name
-        os.environ["INDUSTRY"] = industry
-        os.environ["GEOGRAPHY"] = geography
-        os.environ["SCALE"] = scale
+if st.button("Run Market Research Analysis"):
+    with st.spinner("Running AI-driven market analysis... this may take a minute."):
 
+        # 1️⃣ Clear and recreate outputs ONLY when we actually run the pipeline
+        if os.path.exists(OUTPUT_DIR):
+            shutil.rmtree(OUTPUT_DIR)
+        os.makedirs(OUTPUT_DIR, exist_ok=True)
+
+        # 2️⃣ Prepare environment for child process
+        env = os.environ.copy()
+        env["PRODUCT_NAME"] = product_name
+        env["INDUSTRY"] = industry
+        env["GEOGRAPHY"] = geography
+        env["SCALE"] = scale
+
+        # 3️⃣ Run main.py and capture result (for internal use; no logs shown in UI)
         process = subprocess.run(
             ["python3", "main.py"],
             text=True,
-            capture_output=True
+            capture_output=True,
+            env=env,
+            cwd=BASE_DIR,  # important for Render so paths resolve correctly
         )
 
         if process.returncode != 0:
-            st.error("❌ Error running analysis. Check logs in main.py.")
+            st.session_state["run_ok"] = False
+            st.error(
+                "❌ Analysis failed on the server. "
+                "Check your Render logs and environment variables (e.g., OPENAI_API_KEY, dependencies)."
+            )
         else:
-            st.success(f"✅ Analysis completed successfully for **{product_name}**!")
+            # ✅ Successful run – refresh data from new outputs
+            st.session_state["run_ok"] = True
+            st.session_state["last_product_name"] = product_name
+
+            # Competitor pricing
+            st.session_state["df_price"] = build_competitor_df(
+                OUTPUT_DIR, product_name
+            )
+
+            # Sentiment
+            sentiment_file = os.path.join(OUTPUT_DIR, "review_sentiment.md")
+            st.session_state["sentiment"] = extract_sentiment_summary(sentiment_file)
+
+            st.success(
+                f"✅ Analysis completed successfully for **{product_name}**! Scroll down for insights."
+            )
+
+
+# ==========================================
+# 📈 Visualizations – Sentiment & Competitor Pricing
+# ==========================================
+display_product = (
+    st.session_state.get("last_product_name") or product_name or "Your Product"
+)
 
 st.markdown("---")
+col1, col2 = st.columns(2)
 
-# ==========================================
-# 🧩 Helper Function — Extract Sentiment %
-# ==========================================
-def extract_sentiment_summary(file_path):
-    if not os.path.exists(file_path):
-        return 60, 30, 10
+# ---- Sentiment Pie Chart ----
+with col1:
+    st.subheader("💬 Customer Sentiment Overview")
 
-    with open(file_path, "r", encoding="utf-8") as f:
-        text = f.read().lower()
+    pos, neg, neu = st.session_state.get("sentiment", (60, 30, 10))
 
-    pos = int(re.search(r"positive[^0-9]*([0-9]{1,3})%", text).group(1)) if re.search(r"positive[^0-9]*([0-9]{1,3})%", text) else 60
-    neg = int(re.search(r"negative[^0-9]*([0-9]{1,3})%", text).group(1)) if re.search(r"negative[^0-9]*([0-9]{1,3})%", text) else 30
-    neu = int(re.search(r"neutral[^0-9]*([0-9]{1,3})%", text).group(1)) if re.search(r"neutral[^0-9]*([0-9]{1,3})%", text) else 10
+    df_sentiment = pd.DataFrame(
+        {
+            "Sentiment": ["Positive", "Negative", "Neutral"],
+            "Percentage": [pos, neg, neu],
+        }
+    )
 
-    return pos, neg, neu
+    fig_sentiment = px.pie(
+        df_sentiment,
+        names="Sentiment",
+        values="Percentage",
+        hole=0.3,
+        title=f"Sentiment Breakdown for {display_product}",
+    )
+    st.plotly_chart(fig_sentiment, use_container_width=True)
 
-# ==========================================
-# 💬 Sentiment Analysis Visualization
-# ==========================================
-st.subheader("💬 Customer Sentiment Overview")
+# ---- Competitor Pricing Bar Chart ----
+with col2:
+    st.subheader("💰 Competitor Pricing Overview")
 
-pos, neg, neu = extract_sentiment_summary("outputs/review_sentiment.md")
-df_sentiment = pd.DataFrame({
-    "Sentiment": ["Positive", "Negative", "Neutral"],
-    "Percentage": [pos, neg, neu]
-})
+    if st.session_state.get("run_ok") and st.session_state.get("df_price") is not None:
+        df_price = st.session_state["df_price"]
 
-fig1 = px.pie(
-    df_sentiment,
-    names="Sentiment",
-    values="Percentage",
-    color="Sentiment",
-    hole=0.3,
-    title=f"Sentiment Breakdown for {product_name}",
-    color_discrete_map={
-        "Positive": "#2ecc71",
-        "Negative": "#e74c3c",
-        "Neutral": "#95a5a6"
-    }
-)
-
-fig1.update_traces(textinfo="percent+label", pull=[0.02, 0.05, 0])
-fig1.update_layout(title_x=0.5)
-
-st.plotly_chart(fig1, use_container_width=True)
+        fig_price = px.bar(
+            df_price,
+            x="Competitor",
+            y="Price ($)",
+            text="Price ($)",
+            title=f"Price Comparison: {display_product} vs Competitors",
+        )
+        fig_price.update_traces(textposition="outside")
+        fig_price.update_layout(yaxis_title="Price ($)")
+        st.plotly_chart(fig_price, use_container_width=True)
+    else:
+        st.info(
+            "Run the analysis to see competitor pricing based on the latest AI-generated report."
+        )
 
 
-# ==========================================
-# 💰 Competitor Pricing (Dynamic if available)
-# ==========================================
-st.subheader("💰 Competitor Pricing Overview")
-
-pricing_file = os.path.join(output_dir, "competitor_analysis.md")
-competitor_data = []
-
-# ---- Extract competitors from markdown if available ----
-if os.path.exists(pricing_file):
-    with open(pricing_file, "r", encoding="utf-8") as f:
-        lines = f.readlines()
-
-    competitor_name = None
-    price_value = None
-
-    for line in lines:
-
-        # Detect competitor header
-        header_match = re.search(r"### Competitor:\s*\*\*(.*?)\*\*", line)
-        if header_match:
-            competitor_name = header_match.group(1).strip()
-            price_value = None  # reset
-            continue
-
-        # Detect price line
-        price_match = re.search(r"Price:\s*\$([0-9]+)", line)
-        if price_match and competitor_name:
-            price_value = int(price_match.group(1))
-            competitor_data.append(
-                {"Competitor": competitor_name, "Price ($)": price_value}
-            )
-            competitor_name = None  # reset for next competitor
-
-# ---- Use fallback sample if nothing extracted ----
-if not competitor_data:
-    competitor_data = [
-        {"Competitor": "HydraSmart Bottle", "Price ($)": 799},
-        {"Competitor": "PureSip Tech Flask", "Price ($)": 699},
-        {"Competitor": "SmartHydrate 2.0", "Price ($)": 999},
-        {"Competitor": product_name, "Price ($)": 1099}
-    ]
-
-# ---- Build DataFrame ----
-df_price = pd.DataFrame(competitor_data)
-
-# ---- Plot chart ----
-fig2 = px.bar(
-    df_price,
-    x="Competitor",
-    y="Price ($)",
-    color="Competitor",
-    text="Price ($)",
-    title=f"Price Comparison: {product_name} vs Competitors",
-    color_discrete_sequence=px.colors.qualitative.Safe
-)
-
-st.plotly_chart(fig2, use_container_width=True)
 
 # ==========================================
 # ⚙️ Feature Comparison Radar
