@@ -323,50 +323,9 @@ fig_trend = px.line(
     markers=True,
     color_discrete_sequence=["#1ABC9C"],
 )
-fig_trend.add_traces(
-    px.area(market_trend, x="Year", y="Upper Bound")
-    .update_traces(
-        fill="tonexty",
-        fillcolor="rgba(26, 188, 156, 0.18)",
-        line=dict(color="rgba(0,0,0,0)"),
-    )
-    .data
+area = px.area(market_trend, x="Year", y="Upper Bound").update_traces(
+    fill="tonexty",
+    fillcolor="rgba(26, 188, 156, 0.18)",
+    line=dict(color="rgba(0,0,0,0)"),
 )
-fig_trend.update_layout(
-    xaxis_title="Year",
-    yaxis_title="Market Growth (%)",
-    xaxis=dict(
-        type="category",
-        tickmode="array",
-        tickvals=market_trend["Year"],
-        ticktext=market_trend["Year"],
-    ),
-    showlegend=False,
-    plot_bgcolor="white",
-    margin=dict(l=40, r=30, t=60, b=40),
-)
-st.plotly_chart(fig_trend, use_container_width=True)
-
-# ==========================================
-# 📊 Key Market Indicators (Dynamic)
-# ==========================================
-st.subheader("📊 Key Market Indicators")
-col1, col2, col3 = st.columns(3)
-col1.metric("Positive Sentiment", f"{pos}%", "↑ vs last month")
-col2.metric("Negative Sentiment", f"{neg}%", "↓ slightly")
-col3.metric("Neutral Sentiment", f"{neu}%", " ")
-
-st.markdown("---")
-
-# ==========================================
-# 🧾 Full Market Research Reports
-# ==========================================
-st.subheader("📘 Full Market Research Reports")
-
-if os.path.exists(OUTPUT_DIR):
-    md_files = [f for f in os.listdir(OUTPUT_DIR) if f.endswith(".md")]
-    st.caption(f"Markdown reports found: {md_files or 'None'}")
-
-    if md_files:
-        for md_file in md_files:
-            with open(os.path.join(OUTPUT_DIR, md_file), "r",
+fig_trend._
