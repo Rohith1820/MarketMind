@@ -4,7 +4,6 @@ import shutil
 import subprocess
 
 import pandas as pd
-import matplotlib.pyplot as plt  # optional
 import plotly.express as px
 import streamlit as st
 
@@ -68,14 +67,35 @@ def extract_sentiment_summary(file_path: str):
     return pos, neg, neu
 
 
-def parse_competitors_from_markdown(pricing_file: str, product_name: str):
+def clean_competitor_label(name: str) -> str:
+    """
+    Clean raw header text into a short competitor name.
+    Examples:
+      "Company name: Enviva Partners, LP | Largest global supplier"
+        -> "Enviva Partners, LP"
+    """
+    # Remove leading "Company name:" (case-insensitive)
+    name = re.sub(r"(?i)company\s*name[:\-]*", "", name).strip()
+
+    # If there is extra description separated by "|", keep only the first part
+    if "|" in name:
+        name = name.split("|")[0].strip()
+
+    # If there is extra description separated by " - ", keep left part
+    if " - " in name:
+        name = name.split(" - ")[0].strip()
+
+    return name
+
+
+def parse_competitors_from_markdown(pricing_file: str, product_name: str) -> pd.DataFrame:
     """
     Very tolerant parser for outputs/competitor_analysis.md.
 
     Strategy:
-      - Look for any number on a line (price).
+      - Look for any numeric value on a line (price).
       - Use the nearest non-empty line *above* it as competitor name.
-      - Clean markdown bullets/headings and 'Competitor:' text.
+      - Clean markdown bullets/headings and 'Competitor:' / 'Company name:' text.
     """
     rows = []
 
@@ -85,7 +105,7 @@ def parse_competitors_from_markdown(pricing_file: str, product_name: str):
                 lines = f.readlines()
         except Exception:
             lines = []
-
+        # iterate over lines looking for prices
         for i, line in enumerate(lines):
             # find a numeric price on this line
             price_match = re.search(r"([₹$]|rs\.?\s*)?([0-9][0-9,\.]*)", line, re.IGNORECASE)
@@ -99,7 +119,7 @@ def parse_competitors_from_markdown(pricing_file: str, product_name: str):
             except ValueError:
                 continue
 
-            # walk backwards to find the nearest non-empty line for name
+            # walk backwards to find nearest non-empty line: header/name
             header = None
             j = i - 1
             while j >= 0:
@@ -112,7 +132,7 @@ def parse_competitors_from_markdown(pricing_file: str, product_name: str):
             if not header:
                 continue
 
-            # clean header into a name
+            # clean markdown header into a name
             name = header
             # remove leading markdown bullets/headings/numbers
             name = re.sub(r"^[#\-\*\d\.\)\s]+", "", name)
@@ -120,11 +140,14 @@ def parse_competitors_from_markdown(pricing_file: str, product_name: str):
             name = name.replace("**", "")
             # remove 'Competitor' label if present
             name = re.sub(r"(?i)competitor[:\-]*", "", name).strip()
-            # final cleanup
+            # final cleanup of punctuation
             name = name.strip(":- ").strip()
 
             if not name:
                 continue
+
+            # extra cleanup for "Company name: X | ..." style
+            name = clean_competitor_label(name)
 
             rows.append({"Competitor": name, "Price ($)": price_value})
 
@@ -137,7 +160,10 @@ def parse_competitors_from_markdown(pricing_file: str, product_name: str):
             {"Competitor": product_name, "Price ($)": 1099},
         ]
 
-    return pd.DataFrame(rows)
+    df = pd.DataFrame(rows)
+    # final safety pass on labels
+    df["Competitor"] = df["Competitor"].astype(str).apply(clean_competitor_label)
+    return df
 
 # ==========================================
 # 🚀 Run Market Research Analysis
@@ -145,7 +171,7 @@ def parse_competitors_from_markdown(pricing_file: str, product_name: str):
 if st.button("🚀 Run Market Research Analysis"):
     with st.spinner("Running AI-driven market analysis... please wait 1–2 minutes."):
 
-        # 🧹 ONLY clear outputs when the button is clicked
+        # Clear outputs ONLY when the button is clicked
         if os.path.exists(OUTPUT_DIR):
             shutil.rmtree(OUTPUT_DIR)
         os.makedirs(OUTPUT_DIR, exist_ok=True)
@@ -166,7 +192,7 @@ if st.button("🚀 Run Market Research Analysis"):
 
         if process.returncode != 0:
             st.session_state["analysis_done"] = False
-            st.error("❌ Error running analysis. Check Railway logs and stdout/stderr.")
+            st.error("❌ Error running analysis. Check server logs.")
             st.code(process.stderr or process.stdout or "No output", language="bash")
         else:
             st.session_state["analysis_done"] = True
@@ -183,7 +209,10 @@ sentiment_file = os.path.join(OUTPUT_DIR, "review_sentiment.md")
 pos, neg, neu = extract_sentiment_summary(sentiment_file)
 
 df_sentiment = pd.DataFrame(
-    {"Sentiment": ["Positive", "Negative", "Neutral"], "Percentage": [pos, neg, neu]}
+    {
+        "Sentiment": ["Positive", "Negative", "Neutral"],
+        "Percentage": [pos, neg, neu],
+    }
 )
 
 fig1 = px.pie(
@@ -210,7 +239,7 @@ st.subheader("💰 Competitor Pricing Overview")
 
 pricing_file = os.path.join(OUTPUT_DIR, "competitor_analysis.md")
 df_price = parse_competitors_from_markdown(pricing_file, product_name)
-competitor_data = df_price.to_dict("records")  # reuse for radar chart
+competitor_data = df_price.to_dict("records")  # reuse for radar
 
 fig2 = px.bar(
     df_price,
@@ -223,9 +252,9 @@ fig2 = px.bar(
 )
 st.plotly_chart(fig2, use_container_width=True)
 
-# Optional: show parsed table for debugging
+# Optional: quick view of parsed competitor table
 with st.expander("🔍 Parsed competitor data"):
-    st.dataframe(df_price)
+    st.dataframe(df_price, use_container_width=True)
 
 # ==========================================
 # ⚙️ Feature Comparison Radar
