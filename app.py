@@ -1,4 +1,3 @@
-
 import pandas as pd
 import matplotlib.pyplot as plt
 import plotly.express as px
@@ -36,7 +35,7 @@ with st.expander("⚙️ Configure Product Details", expanded=True):
 # 📂 Paths & basic state
 # ==========================================
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-OUTPUT_DIR = os.path.join(BASE_DIR, "outputs")
+OUTPUT_DIR = os.path.join(BASE_DIR, "outputs")  # <-- use this everywhere
 
 if "analysis_done" not in st.session_state:
     st.session_state["analysis_done"] = False
@@ -86,7 +85,9 @@ def extract_sentiment_summary(file_path):
 # ==========================================
 st.subheader("💬 Customer Sentiment Overview")
 
-pos, neg, neu = extract_sentiment_summary("outputs/review_sentiment.md")
+sentiment_path = os.path.join(OUTPUT_DIR, "review_sentiment.md")
+pos, neg, neu = extract_sentiment_summary(sentiment_path)
+
 df_sentiment = pd.DataFrame({
     "Sentiment": ["Positive", "Negative", "Neutral"],
     "Percentage": [pos, neg, neu]
@@ -111,13 +112,36 @@ fig1.update_layout(title_x=0.5)
 
 st.plotly_chart(fig1, use_container_width=True)
 
+# ==========================================
+# Helper to clean competitor name
+# ==========================================
+def clean_competitor_name(name: str) -> str:
+    if not isinstance(name, str):
+        name = str(name)
+
+    # Remove any "Company name:" prefix
+    name = re.sub(r"(?i)company\s*name[:\-]*", "", name)
+
+    # Remove any [bracketed] or (parenthesized) noise
+    name = re.sub(r"\[.*?\]", "", name)
+    name = re.sub(r"\(.*?\)", "", name)
+
+    # If there is extra description separated by "|", keep only the first part
+    if "|" in name:
+        name = name.split("|")[0].strip()
+
+    # If there is extra description separated by " - ", keep only the first part
+    if " - " in name:
+        name = name.split(" - ")[0].strip()
+
+    return name.strip()
 
 # ==========================================
 # 💰 Competitor Pricing (Dynamic if available)
 # ==========================================
 st.subheader("💰 Competitor Pricing Overview")
 
-pricing_file = os.path.join(output_dir, "competitor_analysis.md")
+pricing_file = os.path.join(OUTPUT_DIR, "competitor_analysis.md")  # <-- FIXED
 competitor_data = []
 
 # ---- Extract competitors from markdown if available ----
@@ -131,9 +155,9 @@ if os.path.exists(pricing_file):
     for line in lines:
 
         # Detect competitor header
-        header_match = re.search(r"### Competitor:\s*\*\*(.*?)\*\*", line)
+        header_match = re.search(r"###\s*Competitor:\s*\*\*(.*?)\*\*", line)
         if header_match:
-            competitor_name = header_match.group(1).strip()
+            competitor_name = clean_competitor_name(header_match.group(1).strip())
             price_value = None  # reset
             continue
 
@@ -154,6 +178,9 @@ if not competitor_data:
         {"Competitor": "SmartHydrate 2.0", "Price ($)": 999},
         {"Competitor": product_name, "Price ($)": 1099}
     ]
+
+# Limit to max 5 competitors
+competitor_data = competitor_data[:5]
 
 # ---- Build DataFrame ----
 df_price = pd.DataFrame(competitor_data)
@@ -269,12 +296,12 @@ st.markdown("---")
 # ==========================================
 st.subheader("📘 Full Market Research Reports")
 
-if os.path.exists(output_dir):
-    md_files = [f for f in os.listdir(output_dir) if f.endswith(".md")]
+if os.path.exists(OUTPUT_DIR):   # <-- FIXED
+    md_files = [f for f in os.listdir(OUTPUT_DIR) if f.endswith(".md")]
 
     if md_files:
         for md_file in md_files:
-            with open(os.path.join(output_dir, md_file), "r", encoding="utf-8") as f:
+            with open(os.path.join(OUTPUT_DIR, md_file), "r", encoding="utf-8") as f:
                 content = f.read()
             with st.expander(f"📄 {md_file}", expanded=False):
                 st.markdown(content)
