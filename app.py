@@ -64,10 +64,6 @@ def build_competitor_df(output_dir: str, product_name: str) -> pd.DataFrame:
 
         for i, line in enumerate(lines):
             # Try to detect a numeric price on this line
-            # Examples it will match:
-            #   "- Price: $999"
-            #   "Price: ₹ 1,299"
-            #   "Price - 899"
             price_match = re.search(r"([0-9][0-9,\.]*)", line)
             if not price_match:
                 continue
@@ -96,7 +92,6 @@ def build_competitor_df(output_dir: str, product_name: str) -> pd.DataFrame:
             name = header_line
 
             # Remove markdown bullets / heading markers / list indices
-            # e.g. "### Competitor: **Brand X**" -> "Competitor: **Brand X**"
             name = re.sub(r"^[#\-\*\d\.\)\s]+", "", name)
             # Remove bold markers
             name = name.replace("**", "")
@@ -123,6 +118,45 @@ def build_competitor_df(output_dir: str, product_name: str) -> pd.DataFrame:
         ]
 
     return pd.DataFrame(competitor_rows)
+
+
+def extract_sentiment_summary(sentiment_file: str):
+    """
+    Parse outputs/review_sentiment.md to get positive/negative/neutral percentages.
+    Super defensive: on any error, return (60, 30, 10).
+    """
+    default = (60, 30, 10)
+
+    try:
+        if not os.path.exists(sentiment_file):
+            return default
+
+        with open(sentiment_file, "r", encoding="utf-8") as f:
+            text = f.read()
+
+        # Try some flexible regex patterns
+        pos_match = re.search(r"Positive[^0-9]*([0-9]+)", text, re.IGNORECASE)
+        neg_match = re.search(r"Negative[^0-9]*([0-9]+)", text, re.IGNORECASE)
+        neu_match = re.search(r"Neutral[^0-9]*([0-9]+)", text, re.IGNORECASE)
+
+        pos = int(pos_match.group(1)) if pos_match else default[0]
+        neg = int(neg_match.group(1)) if neg_match else default[1]
+        neu = int(neu_match.group(1)) if neu_match else default[2]
+
+        total = pos + neg + neu
+        if total == 0:
+            return default
+
+        # Normalize to percentages (just in case)
+        pos = round(100 * pos / total)
+        neg = round(100 * neg / total)
+        neu = 100 - pos - neg  # ensure sum=100
+
+        return (pos, neg, neu)
+    except Exception:
+        # Anything weird -> safe default
+        return default
+
 
 # ==========================================
 # 🎛️ User Inputs
@@ -265,7 +299,6 @@ with col2:
         st.info(
             "Run the analysis to see competitor pricing based on the latest AI-generated report."
         )
-
 
 # ==========================================
 # ⚙️ Feature Comparison Radar
