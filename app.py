@@ -4,7 +4,7 @@ import shutil
 import subprocess
 
 import pandas as pd
-import matplotlib.pyplot as plt  # (you don't actually use this, but it's fine)
+import matplotlib.pyplot as plt  # optional, but OK to keep
 import plotly.express as px
 import streamlit as st
 
@@ -29,6 +29,9 @@ OUTPUT_DIR = os.path.join(BASE_DIR, "outputs")
 if "analysis_done" not in st.session_state:
     st.session_state["analysis_done"] = False
 
+if "logs" not in st.session_state:
+    st.session_state["logs"] = ""
+
 # ==========================================
 # 🧩 Product Configuration Section
 # ==========================================
@@ -47,7 +50,7 @@ with st.expander("⚙️ Configure Product Details", expanded=True):
 if st.button("🚀 Run Market Research Analysis"):
     with st.spinner("Running AI-driven market analysis... please wait 1–2 minutes."):
 
-        # 🧹 ONLY clear outputs when button is clicked
+        # 🧹 ONLY clear outputs when the button is clicked
         if os.path.exists(OUTPUT_DIR):
             shutil.rmtree(OUTPUT_DIR)
         os.makedirs(OUTPUT_DIR, exist_ok=True)
@@ -67,9 +70,15 @@ if st.button("🚀 Run Market Research Analysis"):
             cwd=BASE_DIR,          # important for Render
         )
 
+        st.session_state["logs"] = (
+            f"Return code: {process.returncode}\n\n"
+            f"STDOUT:\n{process.stdout}\n\n"
+            f"STDERR:\n{process.stderr}"
+        )
+
         if process.returncode != 0:
             st.session_state["analysis_done"] = False
-            st.error("❌ Error running analysis. Check logs in main.py / Render logs.")
+            st.error("❌ Error running analysis. Check Render logs and the logs section below.")
         else:
             st.session_state["analysis_done"] = True
             st.success(f"✅ Analysis completed successfully for **{product_name}**!")
@@ -79,12 +88,15 @@ st.markdown("---")
 # ==========================================
 # 🧩 Helper Function — Extract Sentiment %
 # ==========================================
-def extract_sentiment_summary(file_path):
+def extract_sentiment_summary(file_path: str):
     if not os.path.exists(file_path):
         return 60, 30, 10
 
-    with open(file_path, "r", encoding="utf-8") as f:
-        text = f.read().lower()
+    try:
+        with open(file_path, "r", encoding="utf-8") as f:
+            text = f.read().lower()
+    except Exception:
+        return 60, 30, 10
 
     pos_match = re.search(r"positive[^0-9]*([0-9]{1,3})%", text)
     neg_match = re.search(r"negative[^0-9]*([0-9]{1,3})%", text)
@@ -138,26 +150,29 @@ competitor_data = []
 
 # ---- Extract competitors from markdown if available ----
 if os.path.exists(pricing_file):
-    with open(pricing_file, "r", encoding="utf-8") as f:
-        lines = f.readlines()
+    try:
+        with open(pricing_file, "r", encoding="utf-8") as f:
+            lines = f.readlines()
 
-    competitor_name = None
+        competitor_name = None
 
-    for line in lines:
-        # Detect competitor header
-        header_match = re.search(r"###\s*Competitor:\s*\*\*(.*?)\*\*", line)
-        if header_match:
-            competitor_name = header_match.group(1).strip()
-            continue
+        for line in lines:
+            # Detect competitor header
+            header_match = re.search(r"###\s*Competitor:\s*\*\*(.*?)\*\*", line)
+            if header_match:
+                competitor_name = header_match.group(1).strip()
+                continue
 
-        # Detect price line
-        price_match = re.search(r"Price:\s*\$([0-9]+)", line)
-        if price_match and competitor_name:
-            price_value = int(price_match.group(1))
-            competitor_data.append(
-                {"Competitor": competitor_name, "Price ($)": price_value}
-            )
-            competitor_name = None  # reset for next competitor
+            # Detect price line
+            price_match = re.search(r"Price:\s*\$([0-9]+)", line)
+            if price_match and competitor_name:
+                price_value = int(price_match.group(1))
+                competitor_data.append(
+                    {"Competitor": competitor_name, "Price ($)": price_value}
+                )
+                competitor_name = None  # reset for next competitor
+    except Exception:
+        competitor_data = []
 
 # ---- Use fallback sample if nothing extracted ----
 if not competitor_data:
@@ -225,7 +240,6 @@ market_trend = pd.DataFrame({
     "Market Growth (%)": [12, 18, 24, 33],
 })
 
-# Calculate upper confidence band (12% above)
 market_trend["Upper Bound"] = market_trend["Market Growth (%)"] * 1.12
 
 fig_trend = px.line(
@@ -281,6 +295,7 @@ st.subheader("📘 Full Market Research Reports")
 
 if os.path.exists(OUTPUT_DIR):
     md_files = [f for f in os.listdir(OUTPUT_DIR) if f.endswith(".md")]
+    st.caption(f"Reports found: {md_files or 'None'}")  # 👀 quick visibility
 
     if md_files:
         for md_file in md_files:
@@ -294,6 +309,12 @@ else:
     st.warning("Outputs directory not found. Please run analysis.")
 
 # ==========================================
+# 🧪 Logs (for debugging Render issues)
+# ==========================================
+with st.expander("📄 Debug Logs (main.py stdout/stderr)"):
+    st.text_area("Logs", st.session_state.get("logs", "No logs yet."), height=250)
+
+# ==========================================
 # 📘 Sidebar — How to Use
 # ==========================================
 st.sidebar.header("ℹ️ How to Use MarketMind")
@@ -304,7 +325,7 @@ st.sidebar.markdown("""
 1. **Enter your product details**  
 2. **Click 'Run Market Research Analysis'**  
 3. Dashboard visuals update automatically  
-4. Scroll down to download your reports  
+4. Scroll down to view and read your reports  
 
 ---
 
