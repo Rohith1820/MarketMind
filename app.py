@@ -269,21 +269,33 @@ with col2:
         )
 
 
-
 # ==========================================
 # ⚙️ Feature Comparison Radar
 # ==========================================
 st.subheader("⚙️ Feature Comparison Radar")
 
-competitors = [c["Competitor"] for c in competitor_data if c["Competitor"] != product_name][:2]
-if len(competitors) < 2:
-    competitors = ["Competitor A", "Competitor B"]
+# Build competitor list from df_price (if available)
+if st.session_state.get("df_price") is not None:
+    df_price_for_radar = st.session_state["df_price"]
+    # All competitor names except the main product
+    comp_candidates = [
+        c for c in df_price_for_radar["Competitor"].unique()
+        if c != display_product
+    ]
+else:
+    comp_candidates = []
+
+# Ensure we have exactly 2 competitors for the radar (fallback if needed)
+if len(comp_candidates) < 2:
+    comp_radar = ["Competitor A", "Competitor B"]
+else:
+    comp_radar = comp_candidates[:2]
 
 radar_data = pd.DataFrame({
     "Feature": ["Design", "Performance", "Battery", "Integration", "Price Value"],
-    product_name: [9, 8, 7, 9, 6],
-    competitors[0]: [8, 7, 6, 7, 7],
-    competitors[1]: [7, 6, 8, 6, 8]
+    display_product: [9, 8, 7, 9, 6],
+    comp_radar[0]: [8, 7, 6, 7, 7],
+    comp_radar[1]: [7, 6, 8, 6, 8]
 })
 
 fig3 = px.line_polar(
@@ -293,10 +305,10 @@ fig3 = px.line_polar(
     color="Product",
     line_close=True,
     template="plotly_white",
-    title=f"Feature Comparison: {product_name} vs {competitors[0]}, {competitors[1]}"
+    title=f"Feature Comparison: {display_product} vs {comp_radar[0]}, {comp_radar[1]}"
 )
 
-fig3.update_traces(fill='toself', opacity=0.6)
+fig3.update_traces(fill="toself", opacity=0.6)
 fig3.update_layout(title_x=0.5)
 
 st.plotly_chart(fig3, use_container_width=True)
@@ -307,7 +319,7 @@ st.plotly_chart(fig3, use_container_width=True)
 st.subheader("📈 Market Growth Trend (2023–2026)")
 
 market_trend = pd.DataFrame({
-    "Year": ["2023", "2024", "2025", "2026"],  # <-- string years remove midpoints
+    "Year": ["2023", "2024", "2025", "2026"],
     "Market Growth (%)": [12, 18, 24, 33],
 })
 
@@ -321,7 +333,6 @@ fig_trend = px.line(
     y="Market Growth (%)",
     title=f"Projected Market Growth in {industry}",
     markers=True,
-    color_discrete_sequence=["#1ABC9C"]
 )
 
 # Add only the upper shaded band
@@ -330,9 +341,8 @@ fig_trend.add_traces(px.area(
     x="Year",
     y="Upper Bound"
 ).update_traces(
-    fill='tonexty',
-    fillcolor='rgba(26, 188, 156, 0.18)',
-    line=dict(color='rgba(0,0,0,0)')
+    fill="tonexty",
+    line=dict(color="rgba(0,0,0,0)")
 ).data)
 
 # Final formatting
@@ -340,8 +350,8 @@ fig_trend.update_layout(
     xaxis_title="Year",
     yaxis_title="Market Growth (%)",
     xaxis=dict(
-        type='category',          # <-- prevents midpoints
-        tickmode='array',
+        type="category",
+        tickmode="array",
         tickvals=market_trend["Year"],
         ticktext=market_trend["Year"]
     ),
@@ -368,12 +378,12 @@ st.markdown("---")
 # ==========================================
 st.subheader("📘 Full Market Research Reports")
 
-if os.path.exists(output_dir):
-    md_files = [f for f in os.listdir(output_dir) if f.endswith(".md")]
+if os.path.exists(OUTPUT_DIR):
+    md_files = [f for f in os.listdir(OUTPUT_DIR) if f.endswith(".md")]
 
     if md_files:
         for md_file in md_files:
-            with open(os.path.join(output_dir, md_file), "r", encoding="utf-8") as f:
+            with open(os.path.join(OUTPUT_DIR, md_file), "r", encoding="utf-8") as f:
                 content = f.read()
             with st.expander(f"📄 {md_file}", expanded=False):
                 st.markdown(content)
@@ -393,7 +403,7 @@ st.sidebar.markdown("""
 1. **Enter your product details**  
 2. **Click 'Run Market Research Analysis'**  
 3. Dashboard visuals update automatically  
-4. Scroll down to download your reports  
+4. Scroll down to view full reports  
 
 ---
 
