@@ -1,12 +1,12 @@
-import os
-import re
-import shutil
-import subprocess
-
+%%writefile app.py
 import pandas as pd
-import matplotlib.pyplot as plt  # optional, but OK to keep
+import matplotlib.pyplot as plt
 import plotly.express as px
 import streamlit as st
+import os
+import subprocess
+import shutil
+import re
 
 # ==========================================
 # ⚙️ Streamlit Page Configuration
@@ -21,18 +21,6 @@ including competitor intelligence, sentiment insights, and growth projections.
 """)
 
 # ==========================================
-# 📂 Paths & basic state
-# ==========================================
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-OUTPUT_DIR = os.path.join(BASE_DIR, "outputs")
-
-if "analysis_done" not in st.session_state:
-    st.session_state["analysis_done"] = False
-
-if "logs" not in st.session_state:
-    st.session_state["logs"] = ""
-
-# ==========================================
 # 🧩 Product Configuration Section
 # ==========================================
 with st.expander("⚙️ Configure Product Details", expanded=True):
@@ -45,42 +33,33 @@ with st.expander("⚙️ Configure Product Details", expanded=True):
         scale = st.selectbox("Business Scale", ["Startup", "SME", "Enterprise"], index=1)
 
 # ==========================================
+# 🧹 Prepare Output Folder
+# ==========================================
+output_dir = "outputs"
+if os.path.exists(output_dir):
+    shutil.rmtree(output_dir)
+os.makedirs(output_dir, exist_ok=True)
+
+# ==========================================
 # 🚀 Run Market Research Analysis
 # ==========================================
 if st.button("🚀 Run Market Research Analysis"):
     with st.spinner("Running AI-driven market analysis... please wait 1–2 minutes."):
 
-        # 🧹 ONLY clear outputs when the button is clicked
-        if os.path.exists(OUTPUT_DIR):
-            shutil.rmtree(OUTPUT_DIR)
-        os.makedirs(OUTPUT_DIR, exist_ok=True)
-
-        # Set env for subprocess
-        env = os.environ.copy()
-        env["PRODUCT_NAME"] = product_name
-        env["INDUSTRY"] = industry
-        env["GEOGRAPHY"] = geography
-        env["SCALE"] = scale
+        os.environ["PRODUCT_NAME"] = product_name
+        os.environ["INDUSTRY"] = industry
+        os.environ["GEOGRAPHY"] = geography
+        os.environ["SCALE"] = scale
 
         process = subprocess.run(
             ["python3", "main.py"],
             text=True,
-            capture_output=True,
-            env=env,
-            cwd=BASE_DIR,          # important for Render
-        )
-
-        st.session_state["logs"] = (
-            f"Return code: {process.returncode}\n\n"
-            f"STDOUT:\n{process.stdout}\n\n"
-            f"STDERR:\n{process.stderr}"
+            capture_output=True
         )
 
         if process.returncode != 0:
-            st.session_state["analysis_done"] = False
-            st.error("❌ Error running analysis. Check Render logs and the logs section below.")
+            st.error("❌ Error running analysis. Check logs in main.py.")
         else:
-            st.session_state["analysis_done"] = True
             st.success(f"✅ Analysis completed successfully for **{product_name}**!")
 
 st.markdown("---")
@@ -88,23 +67,16 @@ st.markdown("---")
 # ==========================================
 # 🧩 Helper Function — Extract Sentiment %
 # ==========================================
-def extract_sentiment_summary(file_path: str):
+def extract_sentiment_summary(file_path):
     if not os.path.exists(file_path):
         return 60, 30, 10
 
-    try:
-        with open(file_path, "r", encoding="utf-8") as f:
-            text = f.read().lower()
-    except Exception:
-        return 60, 30, 10
+    with open(file_path, "r", encoding="utf-8") as f:
+        text = f.read().lower()
 
-    pos_match = re.search(r"positive[^0-9]*([0-9]{1,3})%", text)
-    neg_match = re.search(r"negative[^0-9]*([0-9]{1,3})%", text)
-    neu_match = re.search(r"neutral[^0-9]*([0-9]{1,3})%", text)
-
-    pos = int(pos_match.group(1)) if pos_match else 60
-    neg = int(neg_match.group(1)) if neg_match else 30
-    neu = int(neu_match.group(1)) if neu_match else 10
+    pos = int(re.search(r"positive[^0-9]*([0-9]{1,3})%", text).group(1)) if re.search(r"positive[^0-9]*([0-9]{1,3})%", text) else 60
+    neg = int(re.search(r"negative[^0-9]*([0-9]{1,3})%", text).group(1)) if re.search(r"negative[^0-9]*([0-9]{1,3})%", text) else 30
+    neu = int(re.search(r"neutral[^0-9]*([0-9]{1,3})%", text).group(1)) if re.search(r"neutral[^0-9]*([0-9]{1,3})%", text) else 10
 
     return pos, neg, neu
 
@@ -113,9 +85,7 @@ def extract_sentiment_summary(file_path: str):
 # ==========================================
 st.subheader("💬 Customer Sentiment Overview")
 
-sentiment_file = os.path.join(OUTPUT_DIR, "review_sentiment.md")
-pos, neg, neu = extract_sentiment_summary(sentiment_file)
-
+pos, neg, neu = extract_sentiment_summary("outputs/review_sentiment.md")
 df_sentiment = pd.DataFrame({
     "Sentiment": ["Positive", "Negative", "Neutral"],
     "Percentage": [pos, neg, neu]
@@ -140,39 +110,40 @@ fig1.update_layout(title_x=0.5)
 
 st.plotly_chart(fig1, use_container_width=True)
 
+
 # ==========================================
 # 💰 Competitor Pricing (Dynamic if available)
 # ==========================================
 st.subheader("💰 Competitor Pricing Overview")
 
-pricing_file = os.path.join(OUTPUT_DIR, "competitor_analysis.md")
+pricing_file = os.path.join(output_dir, "competitor_analysis.md")
 competitor_data = []
 
 # ---- Extract competitors from markdown if available ----
 if os.path.exists(pricing_file):
-    try:
-        with open(pricing_file, "r", encoding="utf-8") as f:
-            lines = f.readlines()
+    with open(pricing_file, "r", encoding="utf-8") as f:
+        lines = f.readlines()
 
-        competitor_name = None
+    competitor_name = None
+    price_value = None
 
-        for line in lines:
-            # Detect competitor header
-            header_match = re.search(r"###\s*Competitor:\s*\*\*(.*?)\*\*", line)
-            if header_match:
-                competitor_name = header_match.group(1).strip()
-                continue
+    for line in lines:
 
-            # Detect price line
-            price_match = re.search(r"Price:\s*\$([0-9]+)", line)
-            if price_match and competitor_name:
-                price_value = int(price_match.group(1))
-                competitor_data.append(
-                    {"Competitor": competitor_name, "Price ($)": price_value}
-                )
-                competitor_name = None  # reset for next competitor
-    except Exception:
-        competitor_data = []
+        # Detect competitor header
+        header_match = re.search(r"### Competitor:\s*\*\*(.*?)\*\*", line)
+        if header_match:
+            competitor_name = header_match.group(1).strip()
+            price_value = None  # reset
+            continue
+
+        # Detect price line
+        price_match = re.search(r"Price:\s*\$([0-9]+)", line)
+        if price_match and competitor_name:
+            price_value = int(price_match.group(1))
+            competitor_data.append(
+                {"Competitor": competitor_name, "Price ($)": price_value}
+            )
+            competitor_name = None  # reset for next competitor
 
 # ---- Use fallback sample if nothing extracted ----
 if not competitor_data:
@@ -236,12 +207,14 @@ st.plotly_chart(fig3, use_container_width=True)
 st.subheader("📈 Market Growth Trend (2023–2026)")
 
 market_trend = pd.DataFrame({
-    "Year": ["2023", "2024", "2025", "2026"],
+    "Year": ["2023", "2024", "2025", "2026"],  # <-- string years remove midpoints
     "Market Growth (%)": [12, 18, 24, 33],
 })
 
+# Calculate upper confidence band (12% above)
 market_trend["Upper Bound"] = market_trend["Market Growth (%)"] * 1.12
 
+# Main line chart
 fig_trend = px.line(
     market_trend,
     x="Year",
@@ -251,6 +224,7 @@ fig_trend = px.line(
     color_discrete_sequence=["#1ABC9C"]
 )
 
+# Add only the upper shaded band
 fig_trend.add_traces(px.area(
     market_trend,
     x="Year",
@@ -261,11 +235,12 @@ fig_trend.add_traces(px.area(
     line=dict(color='rgba(0,0,0,0)')
 ).data)
 
+# Final formatting
 fig_trend.update_layout(
     xaxis_title="Year",
     yaxis_title="Market Growth (%)",
     xaxis=dict(
-        type='category',
+        type='category',          # <-- prevents midpoints
         tickmode='array',
         tickvals=market_trend["Year"],
         ticktext=market_trend["Year"]
@@ -293,13 +268,12 @@ st.markdown("---")
 # ==========================================
 st.subheader("📘 Full Market Research Reports")
 
-if os.path.exists(OUTPUT_DIR):
-    md_files = [f for f in os.listdir(OUTPUT_DIR) if f.endswith(".md")]
-    st.caption(f"Reports found: {md_files or 'None'}")  # 👀 quick visibility
+if os.path.exists(output_dir):
+    md_files = [f for f in os.listdir(output_dir) if f.endswith(".md")]
 
     if md_files:
         for md_file in md_files:
-            with open(os.path.join(OUTPUT_DIR, md_file), "r", encoding="utf-8") as f:
+            with open(os.path.join(output_dir, md_file), "r", encoding="utf-8") as f:
                 content = f.read()
             with st.expander(f"📄 {md_file}", expanded=False):
                 st.markdown(content)
@@ -307,12 +281,6 @@ if os.path.exists(OUTPUT_DIR):
         st.info("⚠️ No markdown reports found. Please run analysis first.")
 else:
     st.warning("Outputs directory not found. Please run analysis.")
-
-# ==========================================
-# 🧪 Logs (for debugging Render issues)
-# ==========================================
-with st.expander("📄 Debug Logs (main.py stdout/stderr)"):
-    st.text_area("Logs", st.session_state.get("logs", "No logs yet."), height=250)
 
 # ==========================================
 # 📘 Sidebar — How to Use
@@ -325,7 +293,7 @@ st.sidebar.markdown("""
 1. **Enter your product details**  
 2. **Click 'Run Market Research Analysis'**  
 3. Dashboard visuals update automatically  
-4. Scroll down to view and read your reports  
+4. Scroll down to download your reports  
 
 ---
 
