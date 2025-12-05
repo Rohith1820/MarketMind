@@ -333,6 +333,17 @@ else:
 # 📘 Sidebar — How to Use
 # ==========================================
 st.sidebar.header("ℹ️ How to Use MarketMind")
-st.sidebar.markdown("""
+st.sidebar.markdown(
+    """
 ### 📌 Steps to Run the Analysis
-1. **Enter your pro**
+1. **Enter your product details**
+2. **Click 'Run Market Research Analysis'**
+3. Dashboard visuals update automatically
+4. Scroll down to view the detailed markdown reports
+
+---
+### 💡 Tips
+- Try different industries to see different competitor profiles.
+- Use reports directly in presentations or decks.
+"""
+)
