@@ -328,4 +328,67 @@ area = px.area(market_trend, x="Year", y="Upper Bound").update_traces(
     fillcolor="rgba(26, 188, 156, 0.18)",
     line=dict(color="rgba(0,0,0,0)"),
 )
-fig_trend._
+fig_trend.add_traces(area.data)
+fig_trend.update_layout(
+    xaxis_title="Year",
+    yaxis_title="Market Growth (%)",
+    xaxis=dict(
+        type="category",
+        tickmode="array",
+        tickvals=market_trend["Year"],
+        ticktext=market_trend["Year"],
+    ),
+    showlegend=False,
+    plot_bgcolor="white",
+    margin=dict(l=40, r=30, t=60, b=40),
+)
+st.plotly_chart(fig_trend, use_container_width=True)
+
+# ==========================================
+# 📊 Key Market Indicators (Dynamic)
+# ==========================================
+st.subheader("📊 Key Market Indicators")
+col1, col2, col3 = st.columns(3)
+col1.metric("Positive Sentiment", f"{pos}%", "↑ vs last month")
+col2.metric("Negative Sentiment", f"{neg}%", "↓ slightly")
+col3.metric("Neutral Sentiment", f"{neu}%", " ")
+
+st.markdown("---")
+
+# ==========================================
+# 🧾 Full Market Research Reports
+# ==========================================
+st.subheader("📘 Full Market Research Reports")
+
+if os.path.exists(OUTPUT_DIR):
+    md_files = [f for f in os.listdir(OUTPUT_DIR) if f.endswith(".md")]
+    st.caption(f"Markdown reports found: {md_files or 'None'}")
+
+    if md_files:
+        for md_file in md_files:
+            with open(os.path.join(OUTPUT_DIR, md_file), "r", encoding="utf-8") as f:
+                content = f.read()
+            with st.expander(f"📄 {md_file}", expanded=False):
+                st.markdown(content)
+    else:
+        st.info("⚠️ No markdown reports found. Please run analysis first.")
+else:
+    st.warning("Outputs directory not found. Please run analysis.")
+
+# ==========================================
+# 📘 Sidebar — How to Use
+# ==========================================
+st.sidebar.header("ℹ️ How to Use MarketMind")
+st.sidebar.markdown("""
+### 📌 Steps to Run the Analysis
+
+1. **Enter your product details**  
+2. **Click 'Run Market Research Analysis'**  
+3. Dashboard visuals update automatically  
+4. Scroll down to view the detailed markdown reports  
+
+---
+### 💡 Tips
+- Try different industries to see different competitor profiles.  
+- Use reports directly in presentations or decks.  
+""")
