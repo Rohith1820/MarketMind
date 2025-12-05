@@ -68,14 +68,43 @@ def extract_sentiment_summary(file_path: str):
     return pos, neg, neu
 
 
-def parse_competitors_from_markdown(pricing_file: str, product_name: str):
+def clean_competitor_name(name: str) -> str:
+    """Strip 'Company:', markdown, and extra description from names."""
+    if not isinstance(name, str):
+        name = str(name)
+
+    # remove markdown bold and heading symbols
+    name = name.replace("**", "")
+    name = re.sub(r"^[#\-\*\d\.\)\s]+", "", name)
+
+    # remove obvious prefixes
+    name = re.sub(r"(?i)company\s*name[:\-]*", "", name)
+    name = re.sub(r"(?i)company[:\-]*", "", name)
+    name = re.sub(r"(?i)competitor[:\-]*", "", name)
+
+    # drop bracketed / parenthesized extra info
+    name = re.sub(r"\[.*?\]", "", name)
+    name = re.sub(r"\(.*?\)", "", name)
+
+    # keep only the left side of separators
+    if "|" in name:
+        name = name.split("|")[0]
+    if " - " in name:
+        name = name.split(" - ")[0]
+
+    return name.strip(" :-").strip()
+
+
+def parse_competitors_from_markdown(pricing_file: str, product_name: str) -> pd.DataFrame:
     """
-    Very tolerant parser for outputs/competitor_analysis.md.
+    Safer parser for outputs/competitor_analysis.md.
 
     Strategy:
-      - Look for any number on a line (price).
-      - Use the nearest non-empty line *above* it as competitor name.
-      - Clean markdown bullets/headings and 'Competitor:' text.
+      - Track a current competitor name whenever we see:
+        * '### Competitor: ...'    OR
+        * 'Company: ...'
+      - Only treat lines that contain the word 'Price' as pricing lines.
+      - Ignore any other numeric lines (weakness scores, bullets, etc).
     """
     rows = []
 
@@ -86,58 +115,59 @@ def parse_competitors_from_markdown(pricing_file: str, product_name: str):
         except Exception:
             lines = []
 
-        for i, line in enumerate(lines):
-            # find a numeric price on this line
-            price_match = re.search(r"([₹$]|rs\.?\s*)?([0-9][0-9,\.]*)", line, re.IGNORECASE)
-            if not price_match:
+        current_name = None
+
+        for raw in lines:
+            line = raw.strip()
+
+            if not line:
                 continue
 
-            price_str = price_match.group(2)
-            price_clean = price_str.replace(",", "")
-            try:
-                price_value = float(price_clean)
-            except ValueError:
+            # --- detect competitor headers ---
+            # e.g. "### Competitor: **Company: Hidrate Inc.**"
+            header_match = re.search(r"^#{1,6}\s*Competitor:\s*(.*)", line, re.IGNORECASE)
+            if header_match:
+                current_name = clean_competitor_name(header_match.group(1))
                 continue
 
-            # walk backwards to find the nearest non-empty line for name
-            header = None
-            j = i - 1
-            while j >= 0:
-                cand = lines[j].strip()
-                if cand:
-                    header = cand
-                    break
-                j -= 1
-
-            if not header:
+            # e.g. "Company: Hidrate Inc."
+            company_match = re.search(r"(?i)^company\s*:\s*(.+)", line)
+            if company_match:
+                current_name = clean_competitor_name(company_match.group(1))
                 continue
 
-            # clean header into a name
-            name = header
-            # remove leading markdown bullets/headings/numbers
-            name = re.sub(r"^[#\-\*\d\.\)\s]+", "", name)
-            # remove bold markers
-            name = name.replace("**", "")
-            # remove 'Competitor' label if present
-            name = re.sub(r"(?i)competitor[:\-]*", "", name).strip()
-            # final cleanup
-            name = name.strip(":- ").strip()
+            # --- detect price lines (must contain 'price') ---
+            price_match = re.search(
+                r"(?i)price[^0-9\$]*([\$₹]?\s*([0-9][0-9,\.]*))", line
+            )
+            if price_match and current_name:
+                num_str = price_match.group(2).replace(",", "")
+                try:
+                    price_value = float(num_str)
+                except ValueError:
+                    continue
 
-            if not name:
-                continue
-
-            rows.append({"Competitor": name, "Price ($)": price_value})
+                rows.append(
+                    {"Competitor": current_name, "Price ($)": price_value}
+                )
+                # don't clear current_name; we might have other info below
 
     # Fallback if nothing parsed
     if not rows:
         rows = [
-            {"Competitor": "HydraSmart Bottle", "Price ($)": 799},
-            {"Competitor": "PureSip Tech Flask", "Price ($)": 699},
-            {"Competitor": "SmartHydrate 2.0", "Price ($)": 999},
-            {"Competitor": product_name, "Price ($)": 1099},
+            {"Competitor": "HydraSmart Bottle", "Price ($)": 79.0},
+            {"Competitor": "PureSip Tech Flask", "Price ($)": 69.0},
+            {"Competitor": "SmartHydrate 2.0", "Price ($)": 99.0},
+            {"Competitor": product_name, "Price ($)": 109.0},
         ]
 
-    return pd.DataFrame(rows)
+    df = pd.DataFrame(rows)
+
+    # final clean + de-duplicate + cap to 5 competitors
+    df["Competitor"] = df["Competitor"].astype(str).apply(clean_competitor_name)
+    df = df.drop_duplicates(subset=["Competitor"]).head(5)
+
+    return df
 
 # ==========================================
 # 🚀 Run Market Research Analysis
