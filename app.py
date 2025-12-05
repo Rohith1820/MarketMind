@@ -1,11 +1,12 @@
+import os
+import re
+import shutil
+import subprocess
+
 import pandas as pd
-import matplotlib.pyplot as plt
+import matplotlib.pyplot as plt  # optional
 import plotly.express as px
 import streamlit as st
-import os
-import subprocess
-import shutil
-import re
 
 # ==========================================
 # ⚙️ Streamlit Page Configuration
@@ -20,6 +21,15 @@ including competitor intelligence, sentiment insights, and growth projections.
 """)
 
 # ==========================================
+# 📂 Paths & basic state
+# ==========================================
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+OUTPUT_DIR = os.path.join(BASE_DIR, "outputs")
+
+if "analysis_done" not in st.session_state:
+    st.session_state["analysis_done"] = False
+
+# ==========================================
 # 🧩 Product Configuration Section
 # ==========================================
 with st.expander("⚙️ Configure Product Details", expanded=True):
@@ -32,13 +42,102 @@ with st.expander("⚙️ Configure Product Details", expanded=True):
         scale = st.selectbox("Business Scale", ["Startup", "SME", "Enterprise"], index=1)
 
 # ==========================================
-# 📂 Paths & basic state
+# 🔧 Helper functions
 # ==========================================
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-OUTPUT_DIR = os.path.join(BASE_DIR, "outputs")  # <-- use this everywhere
+def extract_sentiment_summary(file_path: str):
+    """Parse outputs/review_sentiment.md for Positive/Negative/Neutral %."""
+    default = (60, 30, 10)
 
-if "analysis_done" not in st.session_state:
-    st.session_state["analysis_done"] = False
+    if not os.path.exists(file_path):
+        return default
+
+    try:
+        with open(file_path, "r", encoding="utf-8") as f:
+            text = f.read().lower()
+    except Exception:
+        return default
+
+    pos_match = re.search(r"positive[^0-9]*([0-9]{1,3})%", text)
+    neg_match = re.search(r"negative[^0-9]*([0-9]{1,3})%", text)
+    neu_match = re.search(r"neutral[^0-9]*([0-9]{1,3})%", text)
+
+    pos = int(pos_match.group(1)) if pos_match else default[0]
+    neg = int(neg_match.group(1)) if neg_match else default[1]
+    neu = int(neu_match.group(1)) if neu_match else default[2]
+
+    return pos, neg, neu
+
+
+def parse_competitors_from_markdown(pricing_file: str, product_name: str):
+    """
+    Very tolerant parser for outputs/competitor_analysis.md.
+
+    Strategy:
+      - Look for any number on a line (price).
+      - Use the nearest non-empty line *above* it as competitor name.
+      - Clean markdown bullets/headings and 'Competitor:' text.
+    """
+    rows = []
+
+    if os.path.exists(pricing_file):
+        try:
+            with open(pricing_file, "r", encoding="utf-8") as f:
+                lines = f.readlines()
+        except Exception:
+            lines = []
+
+        for i, line in enumerate(lines):
+            # find a numeric price on this line
+            price_match = re.search(r"([₹$]|rs\.?\s*)?([0-9][0-9,\.]*)", line, re.IGNORECASE)
+            if not price_match:
+                continue
+
+            price_str = price_match.group(2)
+            price_clean = price_str.replace(",", "")
+            try:
+                price_value = float(price_clean)
+            except ValueError:
+                continue
+
+            # walk backwards to find the nearest non-empty line for name
+            header = None
+            j = i - 1
+            while j >= 0:
+                cand = lines[j].strip()
+                if cand:
+                    header = cand
+                    break
+                j -= 1
+
+            if not header:
+                continue
+
+            # clean header into a name
+            name = header
+            # remove leading markdown bullets/headings/numbers
+            name = re.sub(r"^[#\-\*\d\.\)\s]+", "", name)
+            # remove bold markers
+            name = name.replace("**", "")
+            # remove 'Competitor' label if present
+            name = re.sub(r"(?i)competitor[:\-]*", "", name).strip()
+            # final cleanup
+            name = name.strip(":- ").strip()
+
+            if not name:
+                continue
+
+            rows.append({"Competitor": name, "Price ($)": price_value})
+
+    # Fallback if nothing parsed
+    if not rows:
+        rows = [
+            {"Competitor": "HydraSmart Bottle", "Price ($)": 799},
+            {"Competitor": "PureSip Tech Flask", "Price ($)": 699},
+            {"Competitor": "SmartHydrate 2.0", "Price ($)": 999},
+            {"Competitor": product_name, "Price ($)": 1099},
+        ]
+
+    return pd.DataFrame(rows)
 
 # ==========================================
 # 🚀 Run Market Research Analysis
@@ -46,52 +145,46 @@ if "analysis_done" not in st.session_state:
 if st.button("🚀 Run Market Research Analysis"):
     with st.spinner("Running AI-driven market analysis... please wait 1–2 minutes."):
 
-        os.environ["PRODUCT_NAME"] = product_name
-        os.environ["INDUSTRY"] = industry
-        os.environ["GEOGRAPHY"] = geography
-        os.environ["SCALE"] = scale
+        # 🧹 ONLY clear outputs when the button is clicked
+        if os.path.exists(OUTPUT_DIR):
+            shutil.rmtree(OUTPUT_DIR)
+        os.makedirs(OUTPUT_DIR, exist_ok=True)
+
+        env = os.environ.copy()
+        env["PRODUCT_NAME"] = product_name
+        env["INDUSTRY"] = industry
+        env["GEOGRAPHY"] = geography
+        env["SCALE"] = scale
 
         process = subprocess.run(
             ["python3", "main.py"],
             text=True,
-            capture_output=True
+            capture_output=True,
+            env=env,
+            cwd=BASE_DIR,
         )
 
         if process.returncode != 0:
-            st.error("❌ Error running analysis. Check logs in main.py.")
+            st.session_state["analysis_done"] = False
+            st.error("❌ Error running analysis. Check Railway logs and stdout/stderr.")
+            st.code(process.stderr or process.stdout or "No output", language="bash")
         else:
+            st.session_state["analysis_done"] = True
             st.success(f"✅ Analysis completed successfully for **{product_name}**!")
 
 st.markdown("---")
-
-# ==========================================
-# 🧩 Helper Function — Extract Sentiment %
-# ==========================================
-def extract_sentiment_summary(file_path):
-    if not os.path.exists(file_path):
-        return 60, 30, 10
-
-    with open(file_path, "r", encoding="utf-8") as f:
-        text = f.read().lower()
-
-    pos = int(re.search(r"positive[^0-9]*([0-9]{1,3})%", text).group(1)) if re.search(r"positive[^0-9]*([0-9]{1,3})%", text) else 60
-    neg = int(re.search(r"negative[^0-9]*([0-9]{1,3})%", text).group(1)) if re.search(r"negative[^0-9]*([0-9]{1,3})%", text) else 30
-    neu = int(re.search(r"neutral[^0-9]*([0-9]{1,3})%", text).group(1)) if re.search(r"neutral[^0-9]*([0-9]{1,3})%", text) else 10
-
-    return pos, neg, neu
 
 # ==========================================
 # 💬 Sentiment Analysis Visualization
 # ==========================================
 st.subheader("💬 Customer Sentiment Overview")
 
-sentiment_path = os.path.join(OUTPUT_DIR, "review_sentiment.md")
-pos, neg, neu = extract_sentiment_summary(sentiment_path)
+sentiment_file = os.path.join(OUTPUT_DIR, "review_sentiment.md")
+pos, neg, neu = extract_sentiment_summary(sentiment_file)
 
-df_sentiment = pd.DataFrame({
-    "Sentiment": ["Positive", "Negative", "Neutral"],
-    "Percentage": [pos, neg, neu]
-})
+df_sentiment = pd.DataFrame(
+    {"Sentiment": ["Positive", "Negative", "Neutral"], "Percentage": [pos, neg, neu]}
+)
 
 fig1 = px.pie(
     df_sentiment,
@@ -103,89 +196,22 @@ fig1 = px.pie(
     color_discrete_map={
         "Positive": "#2ecc71",
         "Negative": "#e74c3c",
-        "Neutral": "#95a5a6"
-    }
+        "Neutral": "#95a5a6",
+    },
 )
-
 fig1.update_traces(textinfo="percent+label", pull=[0.02, 0.05, 0])
 fig1.update_layout(title_x=0.5)
-
 st.plotly_chart(fig1, use_container_width=True)
 
 # ==========================================
-# Helper to clean competitor name
-# ==========================================
-def clean_competitor_name(name: str) -> str:
-    if not isinstance(name, str):
-        name = str(name)
-
-    # Remove any "Company name:" prefix
-    name = re.sub(r"(?i)company\s*name[:\-]*", "", name)
-
-    # Remove any [bracketed] or (parenthesized) noise
-    name = re.sub(r"\[.*?\]", "", name)
-    name = re.sub(r"\(.*?\)", "", name)
-
-    # If there is extra description separated by "|", keep only the first part
-    if "|" in name:
-        name = name.split("|")[0].strip()
-
-    # If there is extra description separated by " - ", keep only the first part
-    if " - " in name:
-        name = name.split(" - ")[0].strip()
-
-    return name.strip()
-
-# ==========================================
-# 💰 Competitor Pricing (Dynamic if available)
+# 💰 Competitor Pricing (Dynamic)
 # ==========================================
 st.subheader("💰 Competitor Pricing Overview")
 
-pricing_file = os.path.join(OUTPUT_DIR, "competitor_analysis.md")  # <-- FIXED
-competitor_data = []
+pricing_file = os.path.join(OUTPUT_DIR, "competitor_analysis.md")
+df_price = parse_competitors_from_markdown(pricing_file, product_name)
+competitor_data = df_price.to_dict("records")  # reuse for radar chart
 
-# ---- Extract competitors from markdown if available ----
-if os.path.exists(pricing_file):
-    with open(pricing_file, "r", encoding="utf-8") as f:
-        lines = f.readlines()
-
-    competitor_name = None
-    price_value = None
-
-    for line in lines:
-
-        # Detect competitor header
-        header_match = re.search(r"###\s*Competitor:\s*\*\*(.*?)\*\*", line)
-        if header_match:
-            competitor_name = clean_competitor_name(header_match.group(1).strip())
-            price_value = None  # reset
-            continue
-
-        # Detect price line
-        price_match = re.search(r"Price:\s*\$([0-9]+)", line)
-        if price_match and competitor_name:
-            price_value = int(price_match.group(1))
-            competitor_data.append(
-                {"Competitor": competitor_name, "Price ($)": price_value}
-            )
-            competitor_name = None  # reset for next competitor
-
-# ---- Use fallback sample if nothing extracted ----
-if not competitor_data:
-    competitor_data = [
-        {"Competitor": "HydraSmart Bottle", "Price ($)": 799},
-        {"Competitor": "PureSip Tech Flask", "Price ($)": 699},
-        {"Competitor": "SmartHydrate 2.0", "Price ($)": 999},
-        {"Competitor": product_name, "Price ($)": 1099}
-    ]
-
-# Limit to max 5 competitors
-competitor_data = competitor_data[:5]
-
-# ---- Build DataFrame ----
-df_price = pd.DataFrame(competitor_data)
-
-# ---- Plot chart ----
 fig2 = px.bar(
     df_price,
     x="Competitor",
@@ -193,26 +219,33 @@ fig2 = px.bar(
     color="Competitor",
     text="Price ($)",
     title=f"Price Comparison: {product_name} vs Competitors",
-    color_discrete_sequence=px.colors.qualitative.Safe
+    color_discrete_sequence=px.colors.qualitative.Safe,
 )
-
 st.plotly_chart(fig2, use_container_width=True)
+
+# Optional: show parsed table for debugging
+with st.expander("🔍 Parsed competitor data"):
+    st.dataframe(df_price)
 
 # ==========================================
 # ⚙️ Feature Comparison Radar
 # ==========================================
 st.subheader("⚙️ Feature Comparison Radar")
 
-competitors = [c["Competitor"] for c in competitor_data if c["Competitor"] != product_name][:2]
+competitors = [
+    c["Competitor"] for c in competitor_data if c["Competitor"] != product_name
+][:2]
 if len(competitors) < 2:
     competitors = ["Competitor A", "Competitor B"]
 
-radar_data = pd.DataFrame({
-    "Feature": ["Design", "Performance", "Battery", "Integration", "Price Value"],
-    product_name: [9, 8, 7, 9, 6],
-    competitors[0]: [8, 7, 6, 7, 7],
-    competitors[1]: [7, 6, 8, 6, 8]
-})
+radar_data = pd.DataFrame(
+    {
+        "Feature": ["Design", "Performance", "Battery", "Integration", "Price Value"],
+        product_name: [9, 8, 7, 9, 6],
+        competitors[0]: [8, 7, 6, 7, 7],
+        competitors[1]: [7, 6, 8, 6, 8],
+    }
+)
 
 fig3 = px.line_polar(
     radar_data.melt(id_vars="Feature", var_name="Product", value_name="Score"),
@@ -221,12 +254,10 @@ fig3 = px.line_polar(
     color="Product",
     line_close=True,
     template="plotly_white",
-    title=f"Feature Comparison: {product_name} vs {competitors[0]}, {competitors[1]}"
+    title=f"Feature Comparison: {product_name} vs {competitors[0]}, {competitors[1]}",
 )
-
-fig3.update_traces(fill='toself', opacity=0.6)
+fig3.update_traces(fill="toself", opacity=0.6)
 fig3.update_layout(title_x=0.5)
-
 st.plotly_chart(fig3, use_container_width=True)
 
 # ==========================================
@@ -234,50 +265,41 @@ st.plotly_chart(fig3, use_container_width=True)
 # ==========================================
 st.subheader("📈 Market Growth Trend (2023–2026)")
 
-market_trend = pd.DataFrame({
-    "Year": ["2023", "2024", "2025", "2026"],  # <-- string years remove midpoints
-    "Market Growth (%)": [12, 18, 24, 33],
-})
-
-# Calculate upper confidence band (12% above)
+market_trend = pd.DataFrame(
+    {"Year": ["2023", "2024", "2025", "2026"], "Market Growth (%)": [12, 18, 24, 33]}
+)
 market_trend["Upper Bound"] = market_trend["Market Growth (%)"] * 1.12
 
-# Main line chart
 fig_trend = px.line(
     market_trend,
     x="Year",
     y="Market Growth (%)",
     title=f"Projected Market Growth in {industry}",
     markers=True,
-    color_discrete_sequence=["#1ABC9C"]
+    color_discrete_sequence=["#1ABC9C"],
 )
-
-# Add only the upper shaded band
-fig_trend.add_traces(px.area(
-    market_trend,
-    x="Year",
-    y="Upper Bound"
-).update_traces(
-    fill='tonexty',
-    fillcolor='rgba(26, 188, 156, 0.18)',
-    line=dict(color='rgba(0,0,0,0)')
-).data)
-
-# Final formatting
+fig_trend.add_traces(
+    px.area(market_trend, x="Year", y="Upper Bound")
+    .update_traces(
+        fill="tonexty",
+        fillcolor="rgba(26, 188, 156, 0.18)",
+        line=dict(color="rgba(0,0,0,0)"),
+    )
+    .data
+)
 fig_trend.update_layout(
     xaxis_title="Year",
     yaxis_title="Market Growth (%)",
     xaxis=dict(
-        type='category',          # <-- prevents midpoints
-        tickmode='array',
+        type="category",
+        tickmode="array",
         tickvals=market_trend["Year"],
-        ticktext=market_trend["Year"]
+        ticktext=market_trend["Year"],
     ),
     showlegend=False,
     plot_bgcolor="white",
-    margin=dict(l=40, r=30, t=60, b=40)
+    margin=dict(l=40, r=30, t=60, b=40),
 )
-
 st.plotly_chart(fig_trend, use_container_width=True)
 
 # ==========================================
@@ -296,8 +318,9 @@ st.markdown("---")
 # ==========================================
 st.subheader("📘 Full Market Research Reports")
 
-if os.path.exists(OUTPUT_DIR):   # <-- FIXED
+if os.path.exists(OUTPUT_DIR):
     md_files = [f for f in os.listdir(OUTPUT_DIR) if f.endswith(".md")]
+    st.caption(f"Markdown reports found: {md_files or 'None'}")
 
     if md_files:
         for md_file in md_files:
@@ -314,18 +337,16 @@ else:
 # 📘 Sidebar — How to Use
 # ==========================================
 st.sidebar.header("ℹ️ How to Use MarketMind")
-
 st.sidebar.markdown("""
 ### 📌 Steps to Run the Analysis
 
 1. **Enter your product details**  
 2. **Click 'Run Market Research Analysis'**  
 3. Dashboard visuals update automatically  
-4. Scroll down to download your reports  
+4. Scroll down to view the detailed markdown reports  
 
 ---
-
 ### 💡 Tips
-- Try different industries to get different competitor profiles.  
+- Try different industries to see different competitor profiles.  
 - Use reports directly in presentations or decks.  
 """)
