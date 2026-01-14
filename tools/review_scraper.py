@@ -1,5 +1,3 @@
-%%writefile tools/review_scraper.py
-# tools/review_scraper.py
 import os
 import re
 import json
