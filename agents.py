@@ -1,75 +1,79 @@
 # agents.py
 from crewai import Agent
-
+from tools.scrape_pipeline import WebSearchTool, WebScrapeTool, FallbackSearchTool, FileReadTool
+from tools.review_scraper import ReviewScraperTool
 
 class MarketResearchAgents:
     def __init__(self):
-        # No external tools wired in here to keep deployment simple.
-        # CrewAI + the LLM will handle most of the reasoning.
-        pass
+        # Initialize tools
+        self.search_tool = WebSearchTool()
+        self.scrape_tool = WebScrapeTool()
+        self.fallback_tool = FallbackSearchTool()
+        self.file_tool = FileReadTool()
+        self.review_tool = ReviewScraperTool()
 
+    # --------------------------------------------------
+    # 1️⃣ Market Strategy Consultant
+    # --------------------------------------------------
     def strategy_consultant(self):
         return Agent(
             role="Market Strategy Consultant",
-            goal="Design a structured research plan for understanding the market, customers, and competition.",
-            backstory=(
-                "You are a senior market strategist who has worked with global brands to "
-                "structure research initiatives, define key questions, and align objectives."
-            ),
-            verbose=True,
+            goal="Develop a comprehensive research plan for understanding the market landscape.",
+            backstory="An expert strategist who frames market research questions and guides market exploration.",
+            tools=[self.search_tool, self.scrape_tool, self.fallback_tool],
+            verbose=False
         )
 
+    # --------------------------------------------------
+    # 2️⃣ Competitor Analyst (Real competitor extraction)
+    # --------------------------------------------------
     def competitor_analyst(self):
         return Agent(
             role="Competitor Analyst",
-            goal=(
-                "Identify and benchmark REAL competitors for the given product, "
-                "including pricing, positioning, and key strengths/weaknesses."
-            ),
+            goal="Find REAL competitors, REAL prices, and REAL product differentiators.",
             backstory=(
-                "You specialize in competitive intelligence and benchmarking across consumer "
-                "and enterprise markets. You always focus on real products and brands."
+                "Expert in competitive intelligence. Always extract real competitor products "
+                "and pricing from search results or industry data. "
+                "Never invent fake competitors unless absolutely necessary."
             ),
-            verbose=True,
+            tools=[self.search_tool, self.scrape_tool, self.fallback_tool],
+            allow_delegation=False,
+            verbose=False
         )
 
+    # --------------------------------------------------
+    # 3️⃣ Customer Persona Analyst
+    # --------------------------------------------------
     def customer_persona_analyst(self):
         return Agent(
             role="Customer Persona Analyst",
-            goal=(
-                "Develop detailed customer personas describing who buys the product, why, and how "
-                "they make decisions."
-            ),
-            backstory=(
-                "You are a behavioral marketing expert who transforms raw data into vivid personas "
-                "with goals, pain points, and buying motivations."
-            ),
-            verbose=True,
+            goal="Create data-backed customer personas for the target market.",
+            backstory="A behavioral marketing expert skilled in demographics, psychographics, and buyer motivations.",
+            tools=[self.search_tool, self.scrape_tool],
+            verbose=False
         )
 
+    # --------------------------------------------------
+    # 4️⃣ Review / Sentiment Analyst
+    # --------------------------------------------------
     def review_analyst(self):
         return Agent(
-            role="Review & Sentiment Analyst",
-            goal=(
-                "Summarize customer sentiment and identify recurring themes from real or hypothetical reviews."
-            ),
-            backstory=(
-                "You specialize in text analysis, extracting sentiment trends and key pain points "
-                "from customer feedback, app store reviews, and social media."
-            ),
-            verbose=True,
+            role="Sentiment and Review Analyst",
+            goal="Analyze real customer reviews to extract sentiment, themes, praises, and complaints.",
+            backstory="Expert in NLP, sentiment extraction, and opinion mining.",
+            tools=[self.review_tool, self.search_tool, self.scrape_tool],
+            allow_delegation=False,
+            verbose=False
         )
 
+    # --------------------------------------------------
+    # 5️⃣ Lead Strategy Synthesizer
+    # --------------------------------------------------
     def lead_strategy_synthesizer(self):
         return Agent(
             role="Lead Strategy Synthesizer",
-            goal=(
-                "Integrate all research outputs into a clear, structured market strategy report "
-                "for executives and product leaders."
-            ),
-            backstory=(
-                "You are a seasoned strategy leader who can read long research artifacts and synthesize "
-                "them into concise, compelling narratives with actionable recommendations."
-            ),
-            verbose=True,
+            goal="Combine all research outputs into a unified strategic market report.",
+            backstory="A senior strategist who synthesizes multiple research streams into actionable recommendations.",
+            tools=[self.file_tool],
+            verbose=False
         )
