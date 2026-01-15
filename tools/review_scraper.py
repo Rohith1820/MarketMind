@@ -6,6 +6,18 @@ from bs4 import BeautifulSoup
 from nltk.sentiment.vader import SentimentIntensityAnalyzer
 import nltk
 from crewai.tools import BaseTool
+import nltk
+
+def ensure_vader():
+    try:
+        nltk.data.find("sentiment/vader_lexicon.zip")
+    except LookupError:
+        nltk.download("vader_lexicon")
+
+ensure_vader()
+
+from nltk.sentiment.vader import SentimentIntensityAnalyzer
+sia = SentimentIntensityAnalyzer()
 
 # Download VADER data if missing
 nltk.download("vader_lexicon", quiet=True)
