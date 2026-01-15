@@ -120,33 +120,26 @@ st.subheader("💰 Competitor Pricing Overview")
 pricing_file = os.path.join(output_dir, "competitor_analysis.md")
 competitor_data = []
 
-# ---- Extract competitors from markdown if available ----
 if os.path.exists(pricing_file):
     with open(pricing_file, "r", encoding="utf-8") as f:
         lines = f.readlines()
 
     competitor_name = None
-    price_value = None
-
     for line in lines:
-
-        # Detect competitor header
         header_match = re.search(r"### Competitor:\s*\*\*(.*?)\*\*", line)
         if header_match:
             competitor_name = header_match.group(1).strip()
-            price_value = None  # reset
             continue
 
-        # Detect price line
         price_match = re.search(r"Price:\s*\$([0-9]+)", line)
         if price_match and competitor_name:
-            price_value = int(price_match.group(1))
-            competitor_data.append(
-                {"Competitor": competitor_name, "Price ($)": price_value}
-            )
-            competitor_name = None  # reset for next competitor
+            competitor_data.append({
+                "Competitor": competitor_name,
+                "Price ($)": int(price_match.group(1))
+            })
+            competitor_name = None
 
-# ---- Use fallback sample if nothing extracted ----
+
 if not competitor_data:
     competitor_data = [
         {"Competitor": "HydraSmart Bottle", "Price ($)": 799},
@@ -155,21 +148,20 @@ if not competitor_data:
         {"Competitor": product_name, "Price ($)": 1099}
     ]
 
-# ---- Build DataFrame ----
+
 df_price = pd.DataFrame(competitor_data)
 
-# ---- Plot chart ----
 fig2 = px.bar(
     df_price,
     x="Competitor",
     y="Price ($)",
-    color="Competitor",
     text="Price ($)",
     title=f"Price Comparison: {product_name} vs Competitors",
-    color_discrete_sequence=px.colors.qualitative.Safe
 )
 
 st.plotly_chart(fig2, use_container_width=True)
+
+
 # ==========================================
 # ⚙️ Feature Comparison Radar
 # ==========================================
