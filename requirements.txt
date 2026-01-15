@@ -14,3 +14,4 @@ trafilatura
 requests
 urllib3
 charset-normalizer
+nltk
