@@ -8,3 +8,5 @@ python-dotenv
 pydantic
 beautifulsoup4
 langdetect
+readability-lxml
+lxml
