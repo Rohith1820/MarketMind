@@ -10,3 +10,7 @@ beautifulsoup4
 langdetect
 readability-lxml
 lxml
+trafilatura
+requests
+urllib3
+charset-normalizer
