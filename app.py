@@ -157,7 +157,6 @@ else:
             df_price,
             x="Competitor",
             y="Price ($)",
-            text="Price ($)",
             title=f"Competitor Pricing for {product_name}",
             color="Competitor"
         )
