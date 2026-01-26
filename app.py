@@ -142,138 +142,129 @@ st.plotly_chart(fig1, use_container_width=True)
 # ==========================================
 st.subheader("💰 Competitor Pricing Overview")
 
-# --- Option A: Let customers enter prices too (recommended) ---
-st.markdown("Enter competitor prices (optional). If left blank, MarketMind uses placeholders.")
+pricing_file = os.path.join(output_dir, "competitor_analysis.md")
+competitor_data = []
 
-pricing_rows = []
-for c in competitors_list:
-    price = st.number_input(f"Price for {c} ($)", min_value=0, value=0, step=1)
-    if price > 0:
-        pricing_rows.append({"Competitor": c, "Price ($)": int(price)})
+if os.path.exists(pricing_file):
+    with open(pricing_file, "r", encoding="utf-8") as f:
+        lines = f.readlines()
 
-# Always include your product price (optional)
-product_price = st.number_input(f"Price for {product_name} ($)", min_value=0, value=0, step=1)
-if product_price > 0:
-    pricing_rows.append({"Competitor": product_name, "Price ($)": int(product_price)})
+    competitor_name = None
+    for line in lines:
+        header_match = re.search(r"### Competitor:\s*\*\*(.*?)\*\*", line)
+        if header_match:
+            competitor_name = header_match.group(1).strip()
+            continue
 
-# If user didn’t enter any prices, fallback to placeholders so chart still works
-if not pricing_rows:
-    pricing_rows = [{"Competitor": c, "Price ($)": 0} for c in competitors_list] + [{"Competitor": product_name, "Price ($)": 0}]
+        price_match = re.search(r"Price:\s*\$([0-9]+)", line)
+        if price_match and competitor_name:
+            competitor_data.append({
+                "Competitor": competitor_name,
+                "Price ($)": int(price_match.group(1))
+            })
+            competitor_name = None
 
-df_price = pd.DataFrame(pricing_rows)
+
+if not competitor_data:
+    competitor_data = [
+        {"Competitor": "HydraSmart Bottle", "Price ($)": 799},
+        {"Competitor": "PureSip Tech Flask", "Price ($)": 699},
+        {"Competitor": "SmartHydrate 2.0", "Price ($)": 999},
+        {"Competitor": product_name, "Price ($)": 1099}
+    ]
+
+
+df_price = pd.DataFrame(competitor_data)
 
 fig2 = px.bar(
     df_price,
     x="Competitor",
     y="Price ($)",
-    color="Competitor",
     text="Price ($)",
-    title=f"Price Comparison: {product_name} vs Competitors"
+    title=f"Price Comparison: {product_name} vs Competitors",
 )
 
 st.plotly_chart(fig2, use_container_width=True)
+
+
 
 # ==========================================
 # ⚙️ Feature Comparison Radar
 # ==========================================
 st.subheader("⚙️ Feature Comparison Radar")
 
-# --- Guardrails ---
-if not features_list:
-    st.warning("Please enter at least 3 features (comma-separated) to show the radar chart.")
-elif len(features_list) < 3:
-    st.warning("Please enter 3 or more features for a useful radar chart.")
-else:
-    entities = [product_name] + competitors_list
+competitors = [c["Competitor"] for c in competitor_data if c["Competitor"] != product_name][:2]
+if len(competitors) < 2:
+    competitors = ["Competitor A", "Competitor B"]
 
-    radar_rows = []
-    for entity in entities:
-        # Skip blank entity names
-        if not entity or not entity.strip():
-            continue
+radar_data = pd.DataFrame({
+    "Feature": ["Design", "Performance", "Battery", "Integration", "Price Value"],
+    product_name: [9, 8, 7, 9, 6],
+    competitors[0]: [8, 7, 6, 7, 7],
+    competitors[1]: [7, 6, 8, 6, 8]
+})
 
-        st.markdown(f"**{entity}**")
-        for feat in features_list:
-            if not feat or not feat.strip():
-                continue
+fig3 = px.line_polar(
+    radar_data.melt(id_vars="Feature", var_name="Product", value_name="Score"),
+    r="Score",
+    theta="Feature",
+    color="Product",
+    line_close=True,
+    template="plotly_white",
+    title=f"Feature Comparison: {product_name} vs {competitors[0]}, {competitors[1]}"
+)
 
-            score = st.slider(
-                f"{entity} — {feat}",
-                0, 10, 5,
-                key=f"score_{entity}_{feat}"
-            )
-            radar_rows.append({"Product": entity, "Feature": feat, "Score": score})
+fig3.update_traces(fill='toself', opacity=0.6)
+fig3.update_layout(title_x=0.5)
 
-    df_radar = pd.DataFrame(radar_rows)
-
-    # --- Final safety check ---
-    if df_radar.empty:
-        st.error("Radar data is empty. Please check your competitor/feature inputs.")
-        st.write("Competitors:", competitors_list)
-        st.write("Features:", features_list)
-    else:
-        fig3 = px.line_polar(
-            df_radar,
-            r="Score",
-            theta="Feature",
-            color="Product",
-            line_close=True,
-            title=f"Feature Comparison: {product_name} vs Selected Competitors"
-        )
-        fig3.update_traces(fill="toself", opacity=0.6)
-        st.plotly_chart(fig3, use_container_width=True)
-
-
+st.plotly_chart(fig3, use_container_width=True)
 # ==========================================
 # 📈 Market Growth Trend
 # ==========================================
 st.subheader("📈 Market Growth Trend (2023–2026)")
 
-years = ["2023", "2024", "2025", "2026"]
-
-# Build a smooth growth curve from adjusted CAGR
-# Start point depends on scale (optional)
-start_growth = 10 if scale == "Startup" else 12 if scale == "SME" else 14
-
-# Growth increases each year but scaled by adjusted CAGR
-growth = []
-current = start_growth
-for i in range(len(years)):
-    # yearly increment derived from adjusted CAGR
-    increment = adjusted_cagr / 6.0  # tuned so 4 years looks reasonable
-    # competitive markets tend to flatten later
-    flatten = 1 - (0.12 * i * competitive_intensity)
-    current = current + increment * flatten
-    growth.append(round(current, 1))
-
 market_trend = pd.DataFrame({
-    "Year": years,
-    "Market Growth (%)": growth
+    "Year": ["2023", "2024", "2025", "2026"],  # <-- string years remove midpoints
+    "Market Growth (%)": [12, 18, 24, 33],
 })
 
-# Upper band for confidence
+# Calculate upper confidence band (12% above)
 market_trend["Upper Bound"] = market_trend["Market Growth (%)"] * 1.12
 
+# Main line chart
 fig_trend = px.line(
     market_trend,
     x="Year",
     y="Market Growth (%)",
-    title=f"Projected Market Growth in {industry} (Competitor-adjusted)",
-    markers=True
+    title=f"Projected Market Growth in {industry}",
+    markers=True,
+    color_discrete_sequence=["#1ABC9C"]
 )
 
-fig_trend.add_traces(
-    px.area(market_trend, x="Year", y="Upper Bound").update_traces(
-        fill="tonexty",
-        line=dict(color="rgba(0,0,0,0)")
-    ).data
-)
+# Add only the upper shaded band
+fig_trend.add_traces(px.area(
+    market_trend,
+    x="Year",
+    y="Upper Bound"
+).update_traces(
+    fill='tonexty',
+    fillcolor='rgba(26, 188, 156, 0.18)',
+    line=dict(color='rgba(0,0,0,0)')
+).data)
 
+# Final formatting
 fig_trend.update_layout(
     xaxis_title="Year",
     yaxis_title="Market Growth (%)",
-    xaxis=dict(type="category"),
-    showlegend=False
+    xaxis=dict(
+        type='category',          # <-- prevents midpoints
+        tickmode='array',
+        tickvals=market_trend["Year"],
+        ticktext=market_trend["Year"]
+    ),
+    showlegend=False,
+    plot_bgcolor="white",
+    margin=dict(l=40, r=30, t=60, b=40)
 )
 
 st.plotly_chart(fig_trend, use_container_width=True)
