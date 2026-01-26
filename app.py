@@ -29,7 +29,13 @@ def safe_load_json(path: str):
 # ----------------------------
 st.set_page_config(page_title="MarketMind Dashboard", layout="wide")
 st.title("🧠 MarketMind: AI Market Research Assistant")
-st.caption("Generate competitor pricing, feature comparison, sentiment, and growth insights using AI.")
+st.header("📊 MarketMind Insights Dashboard")
+
+st.markdown("""
+MarketMind generates **AI-driven market research reports** and dynamic dashboards —
+including competitor intelligence, sentiment insights, and growth projections.
+""")
+
 
 # IMPORTANT: never delete outputs at top-level (Streamlit reruns constantly)
 OUTPUT_DIR = "outputs"
@@ -97,6 +103,36 @@ st.markdown("---")
 prices_json = safe_load_json(os.path.join(OUTPUT_DIR, "competitor_prices.json"))
 scores_json = safe_load_json(os.path.join(OUTPUT_DIR, "feature_scores.json"))
 growth_json = safe_load_json(os.path.join(OUTPUT_DIR, "market_growth.json"))
+
+# ==========================================
+# 💬 Sentiment Analysis Visualization
+# ==========================================
+st.subheader("💬 Customer Sentiment Overview")
+
+pos, neg, neu = extract_sentiment_summary("outputs/review_sentiment.md")
+df_sentiment = pd.DataFrame({
+    "Sentiment": ["Positive", "Negative", "Neutral"],
+    "Percentage": [pos, neg, neu]
+})
+
+fig1 = px.pie(
+    df_sentiment,
+    names="Sentiment",
+    values="Percentage",
+    color="Sentiment",
+    hole=0.3,
+    title=f"Sentiment Breakdown for {product_name}",
+    color_discrete_map={
+        "Positive": "#2ecc71",
+        "Negative": "#e74c3c",
+        "Neutral": "#95a5a6"
+    }
+)
+
+fig1.update_traces(textinfo="percent+label", pull=[0.02, 0.05, 0])
+fig1.update_layout(title_x=0.5)
+
+st.plotly_chart(fig1, use_container_width=True)
 
 # ----------------------------
 # Competitor Pricing Chart (AI-driven)
@@ -197,16 +233,6 @@ else:
         if rationale:
             with st.expander("Why this trend?", expanded=False):
                 st.write(rationale)
-
-st.markdown("---")
-# ==========================================
-# 📊 Key Market Indicators (Dynamic)
-# ==========================================
-st.subheader("📊 Key Market Indicators")
-col1, col2, col3 = st.columns(3)
-col1.metric("Positive Sentiment", f"{pos}%", "↑ vs last month")
-col2.metric("Negative Sentiment", f"{neg}%", "↓ slightly")
-col3.metric("Neutral Sentiment", f"{neu}%", " ")
 
 st.markdown("---")
 
