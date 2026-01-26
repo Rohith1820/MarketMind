@@ -24,15 +24,24 @@ class MarketResearchTasks:
         )
 
     def review_analysis_task(self, agent, product_name):
-        return Task(
-            description=(
-                f"Collect and analyze customer reviews for {product_name}. "
-                "Perform sentiment analysis and clearly include: "
-                "'Positive: X%, Negative: Y%, Neutral: Z%'."
-            ),
-            expected_output="Markdown sentiment report.",
-            agent=agent,
-        )
+    return Task(
+        description=(
+            f"Analyze customer reviews for {product_name} and return STRICT JSON only.\n\n"
+            "Return JSON in this schema (no markdown):\n"
+            "{\n"
+            '  "product": "<product_name>",\n'
+            '  "sentiment": {"positive": 62, "negative": 23, "neutral": 15},\n'
+            '  "top_positive_themes": ["...","...","..."],\n'
+            '  "top_negative_themes": ["...","...","..."],\n'
+            '  "sample_quotes": {\n'
+            '     "positive": ["...","..."],\n'
+            '     "negative": ["...","..."]\n'
+            "  }\n"
+            "}\n"
+        ),
+        expected_output="Strict JSON only.",
+        agent=agent,
+    )
 
     # -----------------------------
     # NEW: AI Pricing JSON task
