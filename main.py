@@ -2,7 +2,6 @@ import os
 import json
 import logging
 import traceback
-import re
 from typing import Optional, Dict, Any, List
 
 from crewai import Crew
@@ -10,6 +9,9 @@ from agents import MarketResearchAgents
 from tasks import MarketResearchTasks
 from tools.feature_comparison import FeatureComparisonTool
 
+# ----------------------------------------
+# Logging
+# ----------------------------------------
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 logging.basicConfig(
     level=getattr(logging, LOG_LEVEL, logging.INFO),
@@ -18,48 +20,63 @@ logging.basicConfig(
 logger = logging.getLogger("MarketMind")
 
 
+# ----------------------------------------
+# Helpers
+# ----------------------------------------
 def _safe_json_loads(text: str) -> Optional[dict]:
-    """Parse a JSON string safely. Returns None if invalid."""
     try:
         return json.loads(text)
     except Exception:
         return None
 
 
-def _extract_sentiment_from_text(text: str) -> Dict[str, int]:
-    """
-    Extract Positive/Negative/Neutral percentages from text.
-    Falls back to default values if not found.
-    """
-    t = (text or "").lower()
+def _write_review_sentiment_md(outputs_dir: str, payload: dict) -> str:
+    sentiment = payload.get("sentiment", {})
+    pos = sentiment.get("positive", 60)
+    neg = sentiment.get("negative", 30)
+    neu = sentiment.get("neutral", 10)
 
-    def _grab(label: str, default: int) -> int:
-        m = re.search(rf"{label}[^0-9]*([0-9]{{1,3}})\s*%", t)
-        if not m:
-            return default
-        try:
-            val = int(m.group(1))
-            return max(0, min(100, val))
-        except Exception:
-            return default
+    pos_themes = payload.get("top_positive_themes", [])
+    neg_themes = payload.get("top_negative_themes", [])
+    quotes = payload.get("sample_quotes", {})
 
-    pos = _grab("positive", 60)
-    neg = _grab("negative", 30)
-    neu = _grab("neutral", 10)
+    lines = []
+    lines.append("# Review Sentiment Summary\n")
+    lines.append(f"**Positive:** {pos}%  ")
+    lines.append(f"**Negative:** {neg}%  ")
+    lines.append(f"**Neutral:** {neu}%\n")
 
-    # Optional: normalize if totals go weird (keep simple & safe)
-    total = pos + neg + neu
-    if total == 0:
-        return {"positive": 60, "negative": 30, "neutral": 10}
-    if total != 100:
-        # scale to 100 (simple proportional normalization)
-        pos = round(pos * 100 / total)
-        neg = round(neg * 100 / total)
-        neu = 100 - pos - neg
+    if pos_themes:
+        lines.append("\n## Top Positive Themes")
+        for t in pos_themes[:5]:
+            lines.append(f"- {t}")
 
-    return {"positive": pos, "negative": neg, "neutral": neu}
+    if neg_themes:
+        lines.append("\n## Top Negative Themes")
+        for t in neg_themes[:5]:
+            lines.append(f"- {t}")
+
+    if quotes:
+        lines.append("\n## Sample Customer Quotes")
+        if quotes.get("positive"):
+            lines.append("\n**Positive:**")
+            for q in quotes["positive"][:3]:
+                lines.append(f"> {q}")
+        if quotes.get("negative"):
+            lines.append("\n**Negative:**")
+            for q in quotes["negative"][:3]:
+                lines.append(f"> {q}")
+
+    path = os.path.join(outputs_dir, "review_sentiment.md")
+    with open(path, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines).strip() + "\n")
+
+    return path
 
 
+# ----------------------------------------
+# Main entry
+# ----------------------------------------
 def run_analysis(
     product_name: Optional[str] = None,
     industry: Optional[str] = None,
@@ -68,21 +85,15 @@ def run_analysis(
     competitors: Optional[List[str]] = None,
     features: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
-    """
-    Runs MarketMind analysis and writes outputs to ./outputs
-    including JSON artifacts for charts.
-    """
-    product_name = product_name or os.getenv("PRODUCT_NAME") or "EcoWave Smart Bottle"
-    industry = industry or os.getenv("INDUSTRY") or "Consumer Goods"
-    geography = geography or os.getenv("GEOGRAPHY") or "US"
-    scale = scale or os.getenv("SCALE") or "SME"
+
+    product_name = product_name or "EcoWave Smart Bottle"
+    industry = industry or "Consumer Goods"
+    geography = geography or "US"
+    scale = scale or "SME"
     competitors = competitors or []
     features = features or []
 
-    logger.info("🚀 Running analysis for %s (%s)", product_name, industry)
-    logger.info("Geography=%s | Scale=%s", geography, scale)
-    logger.info("Competitors=%s", competitors)
-    logger.info("Features=%s", features)
+    logger.info("🚀 Running MarketMind analysis for %s", product_name)
 
     try:
         agents = MarketResearchAgents()
@@ -90,44 +101,60 @@ def run_analysis(
 
         consultant = agents.strategy_consultant()
         competitor_agent = agents.competitor_analyst()
-        customer_analyst = agents.customer_persona_analyst()
-        sentiment_analyst = agents.review_analyst()
+        persona_agent = agents.customer_persona_analyst()
+        sentiment_agent = agents.review_analyst()
         synthesizer = agents.lead_strategy_synthesizer()
 
-        # --- Tasks ---
+        # ---- Tasks ----
         planning_task = tasks.research_planning_task(consultant, product_name, industry)
-        persona_task = tasks.customer_persona_task(customer_analyst, product_name, industry)
+        persona_task = tasks.customer_persona_task(persona_agent, product_name, industry)
 
-        pricing_json_task = tasks.competitor_pricing_json_task(
+        pricing_task = tasks.competitor_pricing_json_task(
             competitor_agent, product_name, industry, competitors
         )
+
         feature_scores_task = tasks.feature_scores_json_task(
             competitor_agent, product_name, industry, competitors, features
         )
+
         growth_task = tasks.market_growth_json_task(
             competitor_agent, product_name, industry, geography, scale, competitors
         )
 
-        review_task = tasks.review_analysis_task(sentiment_analyst, product_name)
+        review_task = tasks.review_analysis_task(sentiment_agent, product_name)
 
-        # External tool (kept)
-        logger.info("🔍 Running feature comparison tool...")
         feature_tool = FeatureComparisonTool()
-        feature_output = feature_tool.run(product_name, industry) if hasattr(feature_tool, "run") else feature_tool._run(product_name, industry)
-        logger.info("✅ Feature comparison tool done.")
+        feature_output = (
+            feature_tool.run(product_name, industry)
+            if hasattr(feature_tool, "run")
+            else feature_tool._run(product_name, industry)
+        )
 
         synthesis_task = tasks.synthesis_task(
             synthesizer,
             product_name,
             industry,
-            [planning_task, pricing_json_task, feature_scores_task, growth_task, persona_task, review_task],
+            [
+                planning_task,
+                pricing_task,
+                feature_scores_task,
+                growth_task,
+                persona_task,
+                review_task,
+            ],
         )
 
         crew = Crew(
-            agents=[consultant, competitor_agent, customer_analyst, sentiment_analyst, synthesizer],
+            agents=[
+                consultant,
+                competitor_agent,
+                persona_agent,
+                sentiment_agent,
+                synthesizer,
+            ],
             tasks=[
                 planning_task,
-                pricing_json_task,
+                pricing_task,
                 feature_scores_task,
                 growth_task,
                 persona_task,
@@ -137,74 +164,76 @@ def run_analysis(
             verbose=True,
         )
 
-        _ = crew.kickoff()
-        logger.info("✅ Crew finished.")
+        crew.kickoff()
 
-        # --- Write outputs ---
+        # ---- Outputs ----
         outputs_dir = "outputs"
         os.makedirs(outputs_dir, exist_ok=True)
-        files_written: List[str] = []
+        files_written = []
 
-        # Markdown reports (keep these)
-        md_files = {
+        # Markdown reports
+        md_map = {
             "research_plan.md": getattr(planning_task, "output", ""),
             "customer_analysis.md": getattr(persona_task, "output", ""),
-            "review_sentiment.md": getattr(review_task, "output", ""),
             "feature_comparison.md": feature_output or "",
             "final_market_strategy_report.md": getattr(synthesis_task, "output", ""),
         }
 
-        for name, content in md_files.items():
+        for name, content in md_map.items():
             if content:
                 path = os.path.join(outputs_dir, name)
                 with open(path, "w", encoding="utf-8") as f:
                     f.write(str(content))
                 files_written.append(path)
 
-        # JSON: competitor prices
-        pricing_json = _safe_json_loads(str(getattr(pricing_json_task, "output", ""))) or {
+        # ---- Sentiment (SINGLE SOURCE OF TRUTH) ----
+        sentiment_payload = _safe_json_loads(str(getattr(review_task, "output", ""))) or {
+            "product": product_name,
+            "sentiment": {"positive": 60, "negative": 30, "neutral": 10},
+            "top_positive_themes": [],
+            "top_negative_themes": [],
+            "sample_quotes": {"positive": [], "negative": []},
+        }
+
+        # sentiment_metrics.json (used by charts)
+        sentiment_metrics = sentiment_payload["sentiment"]
+        sentiment_json_path = os.path.join(outputs_dir, "sentiment_metrics.json")
+        with open(sentiment_json_path, "w", encoding="utf-8") as f:
+            json.dump(sentiment_metrics, f, indent=2)
+        files_written.append(sentiment_json_path)
+
+        # review_sentiment.md (derived from SAME JSON)
+        review_md_path = _write_review_sentiment_md(outputs_dir, sentiment_payload)
+        files_written.append(review_md_path)
+
+        # ---- Other JSON outputs ----
+        pricing_json = _safe_json_loads(str(getattr(pricing_task, "output", ""))) or {
             "product": product_name,
             "currency": "USD",
-            "prices": []
+            "prices": [],
         }
-        prices_path = os.path.join(outputs_dir, "competitor_prices.json")
-        with open(prices_path, "w", encoding="utf-8") as f:
+        with open(os.path.join(outputs_dir, "competitor_prices.json"), "w", encoding="utf-8") as f:
             json.dump(pricing_json, f, indent=2)
-        files_written.append(prices_path)
+        files_written.append(os.path.join(outputs_dir, "competitor_prices.json"))
 
-        # JSON: feature scores
         scores_json = _safe_json_loads(str(getattr(feature_scores_task, "output", ""))) or {
             "product": product_name,
-            "scores": []
+            "scores": [],
         }
-        scores_path = os.path.join(outputs_dir, "feature_scores.json")
-        with open(scores_path, "w", encoding="utf-8") as f:
+        with open(os.path.join(outputs_dir, "feature_scores.json"), "w", encoding="utf-8") as f:
             json.dump(scores_json, f, indent=2)
-        files_written.append(scores_path)
+        files_written.append(os.path.join(outputs_dir, "feature_scores.json"))
 
-        # JSON: market growth
         growth_json = _safe_json_loads(str(getattr(growth_task, "output", ""))) or {
             "industry": industry,
             "geography": geography,
             "years": ["2023", "2024", "2025", "2026"],
             "growth_percent": [12, 18, 24, 33],
-            "rationale": "Fallback trend used because AI JSON was unavailable."
+            "rationale": "Fallback growth curve.",
         }
-        growth_path = os.path.join(outputs_dir, "market_growth.json")
-        with open(growth_path, "w", encoding="utf-8") as f:
+        with open(os.path.join(outputs_dir, "market_growth.json"), "w", encoding="utf-8") as f:
             json.dump(growth_json, f, indent=2)
-        files_written.append(growth_path)
-
-        # ✅ JSON: sentiment metrics (NEW)
-        review_text = str(getattr(review_task, "output", "") or "")
-        sentiment_metrics = _extract_sentiment_from_text(review_text)
-
-        sentiment_path = os.path.join(outputs_dir, "sentiment_metrics.json")
-        with open(sentiment_path, "w", encoding="utf-8") as f:
-            json.dump(sentiment_metrics, f, indent=2)
-        files_written.append(sentiment_path)
-
-        logger.info("✅ Outputs written to %s", outputs_dir)
+        files_written.append(os.path.join(outputs_dir, "market_growth.json"))
 
         return {
             "success": True,
@@ -213,11 +242,11 @@ def run_analysis(
         }
 
     except Exception as e:
-        logger.error("❌ Error: %s", str(e))
-        logger.error("TRACEBACK:\n%s", traceback.format_exc())
+        logger.error("❌ Analysis failed: %s", e)
+        logger.error(traceback.format_exc())
         raise
 
 
-# Optional CLI entrypoint
 if __name__ == "__main__":
     run_analysis()
+
