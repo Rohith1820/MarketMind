@@ -178,32 +178,51 @@ st.plotly_chart(fig2, use_container_width=True)
 # ==========================================
 st.subheader("⚙️ Feature Comparison Radar")
 
-st.markdown("Enter feature scores (0–10). If left blank, MarketMind uses placeholders.")
+# --- Guardrails ---
+if not features_list:
+    st.warning("Please enter at least 3 features (comma-separated) to show the radar chart.")
+elif len(features_list) < 3:
+    st.warning("Please enter 3 or more features for a useful radar chart.")
+else:
+    entities = [product_name] + competitors_list
 
-radar_rows = []
+    radar_rows = []
+    for entity in entities:
+        # Skip blank entity names
+        if not entity or not entity.strip():
+            continue
 
-# include your product + entered competitors
-entities = [product_name] + competitors_list
+        st.markdown(f"**{entity}**")
+        for feat in features_list:
+            if not feat or not feat.strip():
+                continue
 
-for entity in entities:
-    st.markdown(f"**{entity}**")
-    for feat in features_list:
-        score = st.slider(f"{entity} — {feat}", 0, 10, 5, key=f"{entity}_{feat}")
-        radar_rows.append({"Product": entity, "Feature": feat, "Score": score})
+            score = st.slider(
+                f"{entity} — {feat}",
+                0, 10, 5,
+                key=f"score_{entity}_{feat}"
+            )
+            radar_rows.append({"Product": entity, "Feature": feat, "Score": score})
 
-df_radar = pd.DataFrame(radar_rows)
+    df_radar = pd.DataFrame(radar_rows)
 
-fig3 = px.line_polar(
-    df_radar,
-    r="Score",
-    theta="Feature",
-    color="Product",
-    line_close=True,
-    title=f"Feature Comparison: {product_name} vs Selected Competitors"
-)
-fig3.update_traces(fill="toself", opacity=0.6)
+    # --- Final safety check ---
+    if df_radar.empty:
+        st.error("Radar data is empty. Please check your competitor/feature inputs.")
+        st.write("Competitors:", competitors_list)
+        st.write("Features:", features_list)
+    else:
+        fig3 = px.line_polar(
+            df_radar,
+            r="Score",
+            theta="Feature",
+            color="Product",
+            line_close=True,
+            title=f"Feature Comparison: {product_name} vs Selected Competitors"
+        )
+        fig3.update_traces(fill="toself", opacity=0.6)
+        st.plotly_chart(fig3, use_container_width=True)
 
-st.plotly_chart(fig3, use_container_width=True)
 
 # ==========================================
 # 📈 Market Growth Trend
