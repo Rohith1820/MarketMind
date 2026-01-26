@@ -103,6 +103,7 @@ st.markdown("---")
 prices_json = safe_load_json(os.path.join(OUTPUT_DIR, "competitor_prices.json"))
 scores_json = safe_load_json(os.path.join(OUTPUT_DIR, "feature_scores.json"))
 growth_json = safe_load_json(os.path.join(OUTPUT_DIR, "market_growth.json"))
+sentiment_json = safe_load_json(os.path.join(OUTPUT_DIR, "sentiment_metrics.json"))
 
 # ==========================================
 # 💬 Sentiment Analysis Visualization
