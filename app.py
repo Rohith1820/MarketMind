@@ -133,7 +133,7 @@ else:
     st.plotly_chart(fig1, use_container_width=True)
 
 # ----------------------------
-# Competitor Pricing Chart (AI-driven)
+# Competitor Pricing Chart 
 # ----------------------------
 st.subheader("💰 Competitor Pricing Overview (AI-Fetched)")
 
@@ -165,7 +165,7 @@ else:
 st.markdown("---")
 
 # ----------------------------
-# Feature Radar (AI-driven scores)
+# Feature Radar 
 # ----------------------------
 st.subheader("⚙️ Feature Comparison Radar (AI-Scored)")
 
@@ -202,7 +202,7 @@ else:
 st.markdown("---")
 
 # ----------------------------
-# Market Growth Trend (AI-driven)
+# Market Growth Trend 
 # ----------------------------
 st.subheader("📈 Market Growth Trend (AI-Estimated)")
 
