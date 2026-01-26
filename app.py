@@ -239,19 +239,16 @@ st.markdown("---")
 # ==========================================
 st.subheader("📘 Full Market Research Reports")
 
-if os.path.exists(output_dir):
-    md_files = [f for f in os.listdir(output_dir) if f.endswith(".md")]
-
+if os.path.exists(OUTPUT_DIR):
+    md_files = [f for f in os.listdir(OUTPUT_DIR) if f.endswith(".md")]
     if md_files:
-        for md_file in md_files:
-            with open(os.path.join(output_dir, md_file), "r", encoding="utf-8") as f:
+        for md_file in sorted(md_files):
+            with open(os.path.join(OUTPUT_DIR, md_file), "r", encoding="utf-8") as f:
                 content = f.read()
             with st.expander(f"📄 {md_file}", expanded=False):
                 st.markdown(content)
     else:
-        st.info("⚠️ No markdown reports found. Please run analysis first.")
-else:
-    st.warning("Outputs directory not found. Please run analysis.")
+        st.info("No markdown reports found yet. Run analysis first.")
 # ==========================================
 # 📘 Sidebar — How to Use
 # ==========================================
