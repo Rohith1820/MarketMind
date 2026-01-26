@@ -109,30 +109,27 @@ growth_json = safe_load_json(os.path.join(OUTPUT_DIR, "market_growth.json"))
 # ==========================================
 st.subheader("💬 Customer Sentiment Overview")
 
-pos, neg, neu = extract_sentiment_summary("outputs/review_sentiment.md")
-df_sentiment = pd.DataFrame({
-    "Sentiment": ["Positive", "Negative", "Neutral"],
-    "Percentage": [pos, neg, neu]
-})
+if not sentiment_json:
+    st.info("Run analysis to generate sentiment metrics.")
+else:
+    pos = sentiment_json.get("positive", 60)
+    neg = sentiment_json.get("negative", 30)
+    neu = sentiment_json.get("neutral", 10)
 
-fig1 = px.pie(
-    df_sentiment,
-    names="Sentiment",
-    values="Percentage",
-    color="Sentiment",
-    hole=0.3,
-    title=f"Sentiment Breakdown for {product_name}",
-    color_discrete_map={
-        "Positive": "#2ecc71",
-        "Negative": "#e74c3c",
-        "Neutral": "#95a5a6"
-    }
-)
+    df_sentiment = pd.DataFrame({
+        "Sentiment": ["Positive", "Negative", "Neutral"],
+        "Percentage": [pos, neg, neu]
+    })
 
-fig1.update_traces(textinfo="percent+label", pull=[0.02, 0.05, 0])
-fig1.update_layout(title_x=0.5)
-
-st.plotly_chart(fig1, use_container_width=True)
+    fig1 = px.pie(
+        df_sentiment,
+        names="Sentiment",
+        values="Percentage",
+        hole=0.3,
+        title=f"Sentiment Breakdown for {product_name}"
+    )
+    fig1.update_traces(textinfo="percent+label")
+    st.plotly_chart(fig1, use_container_width=True)
 
 # ----------------------------
 # Competitor Pricing Chart (AI-driven)
