@@ -1,133 +1,128 @@
 from crewai import Task
+import json
+
 
 class MarketResearchTasks:
-    # --------------------------------------------
-    # 1️⃣ Research Planning
-    # --------------------------------------------
+
     def research_planning_task(self, agent, product_name, industry):
         return Task(
             description=(
-                f"Develop a structured research plan for {product_name} in the {industry} industry. "
-                "Identify data sources, key market questions, and methods for gathering insights."
+                f"Develop a structured research plan for {product_name} in the {industry} industry."
             ),
-            expected_output=(
-                "A detailed research plan covering objectives, data sources, target audiences, "
-                "and approaches for market data collection."
-            ),
+            expected_output="A detailed research plan in markdown.",
             agent=agent,
         )
 
-    # --------------------------------------------
-    # 2️⃣ Competitor Analysis
-    # --------------------------------------------
-    def competitor_analysis_task(self, agent, product_name, industry):
-        return Task(
-            description=(
-                f"Identify and analyze at least 5 DIRECT real-world competitors for {product_name} "
-                f"in the {industry} industry. "
-                "Return ONLY real companies and products.\n\n"
-                "For each competitor, include:\n"
-                "- Product name\n"
-                "- Company name\n"
-                "- Price in USD\n"
-                "- Key strengths\n"
-                "- Weaknesses\n\n"
-                "The output MUST follow this exact markdown template for each competitor:\n\n"
-                "### Competitor: **<Product Name>**\n"
-                "- Company: <company name>\n"
-                "- Price: $<price>\n"
-                "- Strengths: <comma-separated list>\n"
-                "- Weaknesses: <comma-separated list>\n\n"
-                "Only output the competitors in this structure. Do NOT add extra narrative paragraphs "
-                "before or after the list."
-            ),
-            expected_output=(
-                "A structured list of 5 real-world competitors with pricing and strengths/weaknesses, "
-                "strictly following the markdown template."
-            ),
-            agent=agent,
-        )
-
-    # --------------------------------------------
-    # 3️⃣ Customer Personas & Insights
-    # --------------------------------------------
     def customer_persona_task(self, agent, product_name, industry):
         return Task(
             description=(
                 f"Develop 3–4 detailed customer personas for {product_name} in the {industry} market. "
-                "Include demographics, psychographics, goals, pain points, and buying motivations."
+                "Include demographics, goals, pain points, and buying motivations."
             ),
-            expected_output=(
-                "A markdown document with detailed persona cards summarizing customer types, "
-                "purchase motivations, and behavioral insights."
-            ),
+            expected_output="Markdown personas.",
             agent=agent,
         )
 
-    # --------------------------------------------
-    # 4️⃣ Review Scraping & Sentiment Analysis
-    # --------------------------------------------
     def review_analysis_task(self, agent, product_name):
         return Task(
             description=(
                 f"Collect and analyze customer reviews for {product_name}. "
-                "Perform sentiment analysis and summarize overall satisfaction and pain points. "
-                "Clearly state the percentage of positive, negative, and neutral reviews in the form: "
+                "Perform sentiment analysis and clearly include: "
                 "'Positive: X%, Negative: Y%, Neutral: Z%'."
             ),
-            expected_output=(
-                "A sentiment report in markdown format with percentages of positive, negative, and neutral feedback, "
-                "plus key customer quotes and insights."
-            ),
+            expected_output="Markdown sentiment report.",
             agent=agent,
         )
 
-    # --------------------------------------------
-    # 5️⃣ Executive Summary Generation
-    # --------------------------------------------
-    def executive_summary_task(self, agent, product_name, industry):
+    # -----------------------------
+    # NEW: AI Pricing JSON task
+    # -----------------------------
+    def competitor_pricing_json_task(self, agent, product_name, industry, competitors):
+        competitors_text = ", ".join(competitors) if competitors else "(none provided)"
         return Task(
             description=(
-                f"Summarize all research findings for {product_name} in the {industry} market. "
-                "Condense key insights from competitor, customer, and sentiment analyses "
-                "into an executive summary that can guide strategy."
+                f"Fetch REAL current prices in USD for these competitors of {product_name} "
+                f"in the {industry} industry.\n\n"
+                f"Competitors list (use ONLY these names): {competitors_text}\n\n"
+                "Rules:\n"
+                "- Use web search/sources when possible.\n"
+                "- If a price cannot be found, set price to null.\n"
+                "- Return STRICT JSON only. No markdown.\n\n"
+                "JSON schema:\n"
+                '{\n'
+                '  "product": "<product_name>",\n'
+                '  "currency": "USD",\n'
+                '  "prices": [\n'
+                '    {"name": "<competitor>", "price": 79.99, "source": "<source_name_or_url>"},\n'
+                '    ...\n'
+                '  ]\n'
+                '}\n'
             ),
-            expected_output=(
-                "A concise markdown executive summary (2–3 paragraphs) covering the market outlook, "
-                "key risks, and high-level recommendations."
-            ),
+            expected_output="Strict JSON only.",
             agent=agent,
         )
 
-    # --------------------------------------------
-    # 6️⃣ Visualization / Dashboard Data Prep (optional)
-    # --------------------------------------------
-    def visualization_task(self, agent, product_name):
+    # -----------------------------
+    # NEW: AI Feature scores JSON
+    # -----------------------------
+    def feature_scores_json_task(self, agent, product_name, industry, competitors, features):
+        competitors_text = ", ".join(competitors) if competitors else "(none provided)"
+        features_text = ", ".join(features) if features else "(none provided)"
         return Task(
             description=(
-                f"Generate structured summary data for {product_name}, ready for visualization. "
-                "Output should include key metrics from competitor analysis, sentiment, and customer segmentation."
+                f"Generate feature scores (0–10) for {product_name} vs the competitors below "
+                f"in the {industry} industry.\n\n"
+                f"Competitors (use ONLY these): {competitors_text}\n"
+                f"Features (use ONLY these): {features_text}\n\n"
+                "Rules:\n"
+                "- Score 0–10 for each product-feature pair.\n"
+                "- Be consistent and realistic.\n"
+                "- Return STRICT JSON only.\n\n"
+                "JSON schema:\n"
+                '{\n'
+                '  "product": "<product_name>",\n'
+                '  "scores": [\n'
+                '    {"product": "<name>", "feature": "<feature>", "score": 7, "rationale": "<short reason>"},\n'
+                '    ...\n'
+                '  ]\n'
+                '}\n'
             ),
-            expected_output=(
-                "A markdown table or JSON-like summary suitable for rendering in visual charts."
-            ),
+            expected_output="Strict JSON only.",
             agent=agent,
         )
 
-    # --------------------------------------------
-    # 7️⃣ Final Strategic Synthesis
-    # --------------------------------------------
+    # -----------------------------
+    # NEW: Market Growth JSON task
+    # -----------------------------
+    def market_growth_json_task(self, agent, product_name, industry, geography, scale, competitors):
+        competitors_text = ", ".join(competitors) if competitors else "(none provided)"
+        return Task(
+            description=(
+                f"Estimate market growth trend (2023–2026) for {industry} in {geography} "
+                f"given the competitive landscape:\n{competitors_text}\n\n"
+                f"Business scale: {scale}\n\n"
+                "Return STRICT JSON only.\n"
+                "Schema:\n"
+                '{\n'
+                '  "industry": "<industry>",\n'
+                '  "geography": "<geography>",\n'
+                '  "years": ["2023","2024","2025","2026"],\n'
+                '  "growth_percent": [12, 18, 24, 33],\n'
+                '  "rationale": "<short explanation of why competitors affect the curve>"\n'
+                '}\n'
+            ),
+            expected_output="Strict JSON only.",
+            agent=agent,
+        )
+
     def synthesis_task(self, agent, product_name, industry, dependencies):
         return Task(
             description=(
-                f"Synthesize insights from all prior analyses — research plan, competitor study, customer personas, "
-                f"sentiment analysis, and executive summary — to generate a comprehensive market strategy report "
-                f"for {product_name} in the {industry} industry."
+                f"Create a final market strategy report for {product_name} in {industry} using the provided context."
             ),
             expected_output=(
-                "A comprehensive markdown report titled 'Final Market Strategy Report' with sections: "
-                "Executive Summary, Market Overview, Competitor Insights, Customer Insights, "
-                "Sentiment Analysis, Key Recommendations, and Visual Summary."
+                "A comprehensive markdown report with sections: "
+                "Executive Summary, Market Overview, Competitors, Customers, Sentiment, Recommendations."
             ),
             agent=agent,
             context=dependencies,
