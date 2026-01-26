@@ -3,7 +3,6 @@ from typing import List
 
 
 class MarketResearchTasks:
-
     def research_planning_task(self, agent, product_name, industry):
         return Task(
             description=(
@@ -35,7 +34,7 @@ class MarketResearchTasks:
             description=(
                 f"Estimate pricing for {product_name} and its competitors "
                 f"in the {industry} industry.\n\n"
-                "Return STRICT JSON ONLY in the following format:\n"
+                "Return STRICT JSON ONLY:\n"
                 "{\n"
                 '  "product": "<product_name>",\n'
                 '  "currency": "USD",\n'
@@ -44,38 +43,45 @@ class MarketResearchTasks:
                 '    {"name": "Competitor B", "price": 24.99}\n'
                 "  ]\n"
                 "}\n\n"
-                f"Competitors to include: {competitors}"
+                f"Competitors: {competitors}"
             ),
             expected_output="Strict JSON only.",
             agent=agent,
         )
 
-   def feature_scores_json_task(self, agent, product_name, industry, competitors, features):
-    competitors_text = ", ".join(competitors) if competitors else "(none provided)"
-    features_text = ", ".join(features) if features else "(none provided)"
-
-    return Task(
-        description=(
-            f"Generate feature scores (0–10) for {product_name} and its competitors "
-            f"in the {industry} industry.\n\n"
-            f"Competitors (use ONLY these): {competitors_text}\n"
-            f"Features (use ONLY these): {features_text}\n\n"
-            "Return STRICT JSON ONLY (no markdown) using THIS EXACT SCHEMA:\n"
-            "{\n"
-            f'  "product": "{product_name}",\n'
-            '  "scores": [\n'
-            '    {"product": "<name>", "feature": "<feature>", "score": 0, "rationale": "<short reason>"},\n'
-            '    {"product": "<name>", "feature": "<feature>", "score": 0, "rationale": "<short reason>"}\n'
-            "  ]\n"
-            "}\n\n"
-            "Rules:\n"
-            "- Include rows for the main product AND every competitor\n"
-            "- Include every feature for every product\n"
-            "- score must be a number 0–10\n"
-        ),
-        expected_output="Strict JSON only.",
-        agent=agent,
-    )
+    def feature_scores_json_task(
+        self,
+        agent,
+        product_name,
+        industry,
+        competitors: List[str],
+        features: List[str],
+    ):
+        return Task(
+            description=(
+                f"Generate feature scores (0–10) for {product_name} and competitors "
+                f"in the {industry} industry.\n\n"
+                f"Competitors (ONLY these): {competitors}\n"
+                f"Features (ONLY these): {features}\n\n"
+                "Return STRICT JSON ONLY in this EXACT schema:\n"
+                "{\n"
+                f'  "product": "{product_name}",\n'
+                '  "scores": [\n'
+                '    {\n'
+                '      "product": "<name>",\n'
+                '      "feature": "<feature>",\n'
+                '      "score": 0,\n'
+                '      "rationale": "<short explanation>"\n'
+                "    }\n"
+                "  ]\n"
+                "}\n\n"
+                "Rules:\n"
+                "- Include ALL products and ALL features\n"
+                "- score must be a number from 0 to 10\n"
+            ),
+            expected_output="Strict JSON only.",
+            agent=agent,
+        )
 
     def market_growth_json_task(
         self,
@@ -96,7 +102,7 @@ class MarketResearchTasks:
                 '  "geography": "<geography>",\n'
                 '  "years": ["2023","2024","2025","2026"],\n'
                 '  "growth_percent": [12,18,24,33],\n'
-                '  "rationale": "Short explanation."\n'
+                '  "rationale": "Short explanation"\n'
                 "}\n\n"
                 f"Geography: {geography}\n"
                 f"Scale: {scale}\n"
@@ -113,12 +119,12 @@ class MarketResearchTasks:
                 "Return STRICT JSON ONLY:\n"
                 "{\n"
                 '  "product": "<product_name>",\n'
-                '  "sentiment": {"positive": 62, "negative": 23, "neutral": 15},\n'
-                '  "top_positive_themes": ["...","..."],\n'
-                '  "top_negative_themes": ["...","..."],\n'
+                '  "sentiment": {"positive": 60, "negative": 30, "neutral": 10},\n'
+                '  "top_positive_themes": ["..."],\n'
+                '  "top_negative_themes": ["..."],\n'
                 '  "sample_quotes": {\n'
-                '    "positive": ["...","..."],\n'
-                '    "negative": ["...","..."]\n'
+                '    "positive": ["..."],\n'
+                '    "negative": ["..."]\n'
                 "  }\n"
                 "}\n"
             ),
@@ -129,13 +135,12 @@ class MarketResearchTasks:
     def synthesis_task(self, agent, product_name, industry, context_tasks):
         return Task(
             description=(
-                f"Synthesize all prior analysis into a final executive "
-                f"market strategy report for {product_name} "
-                f"in the {industry} industry.\n\n"
-                "Use sentiment metrics exactly as provided. "
+                f"Synthesize all analysis into a final executive market strategy "
+                f"report for {product_name} in the {industry} industry.\n\n"
+                "Use sentiment metrics EXACTLY as provided. "
                 "Do NOT invent new percentages."
             ),
-            expected_output="Final executive market strategy report in markdown.",
+            expected_output="Final strategy report in markdown.",
             agent=agent,
             context=context_tasks,
         )
