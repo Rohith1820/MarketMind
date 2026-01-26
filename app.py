@@ -36,7 +36,7 @@ with st.expander("⚙️ Configure Product Details", expanded=True):
 
 with st.expander("⚙️ Configure Product Details", expanded=True):
 
-st.markdown("### 🧩 Custom Comparison Inputs")
+     st.markdown("### 🧩 Custom Comparison Inputs")
 
 competitors_raw = st.text_input(
     "Enter Competitors (comma-separated)",
