@@ -50,37 +50,32 @@ class MarketResearchTasks:
             agent=agent,
         )
 
-    def feature_scores_json_task(
-        self,
-        agent,
-        product_name,
-        industry,
-        competitors: List[str],
-        features: List[str],
-    ):
-        return Task(
-            description=(
-                f"Score {product_name} and competitors on selected features "
-                f"in the {industry} industry.\n\n"
-                "Return STRICT JSON ONLY:\n"
-                "{\n"
-                '  "product": "<product_name>",\n'
-                '  "scores": [\n'
-                '    {\n'
-                '      "feature": "Design",\n'
-                '      "scores": {\n'
-                '        "<product_name>": 8,\n'
-                '        "Competitor A": 7\n'
-                "      }\n"
-                "    }\n"
-                "  ]\n"
-                "}\n\n"
-                f"Features: {features}\n"
-                f"Competitors: {competitors}"
-            ),
-            expected_output="Strict JSON only.",
-            agent=agent,
-        )
+   def feature_scores_json_task(self, agent, product_name, industry, competitors, features):
+    competitors_text = ", ".join(competitors) if competitors else "(none provided)"
+    features_text = ", ".join(features) if features else "(none provided)"
+
+    return Task(
+        description=(
+            f"Generate feature scores (0–10) for {product_name} and its competitors "
+            f"in the {industry} industry.\n\n"
+            f"Competitors (use ONLY these): {competitors_text}\n"
+            f"Features (use ONLY these): {features_text}\n\n"
+            "Return STRICT JSON ONLY (no markdown) using THIS EXACT SCHEMA:\n"
+            "{\n"
+            f'  "product": "{product_name}",\n'
+            '  "scores": [\n'
+            '    {"product": "<name>", "feature": "<feature>", "score": 0, "rationale": "<short reason>"},\n'
+            '    {"product": "<name>", "feature": "<feature>", "score": 0, "rationale": "<short reason>"}\n'
+            "  ]\n"
+            "}\n\n"
+            "Rules:\n"
+            "- Include rows for the main product AND every competitor\n"
+            "- Include every feature for every product\n"
+            "- score must be a number 0–10\n"
+        ),
+        expected_output="Strict JSON only.",
+        agent=agent,
+    )
 
     def market_growth_json_task(
         self,
