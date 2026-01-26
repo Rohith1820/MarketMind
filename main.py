@@ -30,7 +30,15 @@ def _safe_json_loads(text: str) -> Optional[dict]:
         return None
 
 
+def _write_json(path: str, payload: dict) -> None:
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(payload, f, indent=2)
+
+
 def _write_review_sentiment_md(outputs_dir: str, payload: dict) -> str:
+    """
+    Creates a clean, readable review_sentiment.md from a sentiment JSON payload.
+    """
     sentiment = payload.get("sentiment", {})
     pos = sentiment.get("positive", 60)
     neg = sentiment.get("negative", 30)
@@ -70,12 +78,80 @@ def _write_review_sentiment_md(outputs_dir: str, payload: dict) -> str:
     path = os.path.join(outputs_dir, "review_sentiment.md")
     with open(path, "w", encoding="utf-8") as f:
         f.write("\n".join(lines).strip() + "\n")
-
     return path
 
 
+def _normalize_price(val: Any) -> str:
+    """
+    Normalize price values like '999', '$849', 699 -> '$999', '$849', '$699'
+    """
+    s = str(val).strip()
+    if not s:
+        return ""
+    s = s.replace("$", "").strip()
+    # if it still isn't numeric-ish, return as-is
+    return f"${s}"
+
+
+def feature_comparison_json_to_md(payload: dict) -> str:
+    """
+    Convert a feature comparison JSON payload into a clean markdown report.
+    Expected payload shape:
+    {
+      "title": "...",
+      "industry": "...",
+      "summary": "...",
+      "comparison_table": [
+        {"feature":"...", "FlowPilot AI":"...", "Competitor A":"..."},
+        ...
+      ]
+    }
+    """
+    title = payload.get("title", "Feature Comparison Report")
+    industry = payload.get("industry", "")
+    summary = payload.get("summary", "")
+    table = payload.get("comparison_table", [])
+
+    md = []
+    md.append(f"# {title}\n")
+    if industry:
+        md.append(f"**Industry:** {industry}\n")
+    if summary:
+        md.append(f"**Summary:** {summary}\n")
+
+    md.append("## Comparison Table\n")
+
+    if not table:
+        md.append("_No comparison table generated._\n")
+        return "\n".join(md)
+
+    # Determine columns (product names) dynamically from first row keys
+    cols = [k for k in table[0].keys() if k != "feature"]
+    if not cols:
+        md.append("_Comparison table missing product columns._\n")
+        return "\n".join(md)
+
+    # Table header
+    md.append("| Feature | " + " | ".join(cols) + " |")
+    md.append("|---|" + "|".join(["---"] * len(cols)) + "|")
+
+    # Table rows
+    for row in table:
+        feat = str(row.get("feature", "")).strip()
+        values = []
+        for c in cols:
+            v = row.get(c, "")
+            # Normalize only if this row is Price-like
+            if feat.lower() in {"price", "pricing"}:
+                v = _normalize_price(v)
+            values.append(str(v).strip())
+        md.append("| " + feat + " | " + " | ".join(values) + " |")
+
+    return "\n".join(md) + "\n"
+
+
 # ----------------------------------------
-# Main entry
+# Main analysis
 # ----------------------------------------
 def run_analysis(
     product_name: Optional[str] = None,
@@ -93,7 +169,10 @@ def run_analysis(
     competitors = competitors or []
     features = features or []
 
-    logger.info("🚀 Running MarketMind analysis for %s", product_name)
+    logger.info("🚀 Running MarketMind analysis for %s (%s)", product_name, industry)
+    logger.info("Geography=%s | Scale=%s", geography, scale)
+    logger.info("Competitors=%s", competitors)
+    logger.info("Features=%s", features)
 
     try:
         agents = MarketResearchAgents()
@@ -121,10 +200,12 @@ def run_analysis(
             competitor_agent, product_name, industry, geography, scale, competitors
         )
 
+        # IMPORTANT: your tasks.py should have review_analysis_task return STRICT JSON
         review_task = tasks.review_analysis_task(sentiment_agent, product_name)
 
+        # External feature comparison tool (may return JSON string or markdown)
         feature_tool = FeatureComparisonTool()
-        feature_output = (
+        raw_feature_output = (
             feature_tool.run(product_name, industry)
             if hasattr(feature_tool, "run")
             else feature_tool._run(product_name, industry)
@@ -145,13 +226,7 @@ def run_analysis(
         )
 
         crew = Crew(
-            agents=[
-                consultant,
-                competitor_agent,
-                persona_agent,
-                sentiment_agent,
-                synthesizer,
-            ],
+            agents=[consultant, competitor_agent, persona_agent, sentiment_agent, synthesizer],
             tasks=[
                 planning_task,
                 pricing_task,
@@ -166,16 +241,28 @@ def run_analysis(
 
         crew.kickoff()
 
-        # ---- Outputs ----
+        # ---- Outputs folder ----
         outputs_dir = "outputs"
         os.makedirs(outputs_dir, exist_ok=True)
-        files_written = []
+        files_written: List[str] = []
 
-        # Markdown reports
+        # ---- Feature Comparison: write CLEAN markdown ----
+        fc_payload = _safe_json_loads(str(raw_feature_output)) if raw_feature_output else None
+        if fc_payload and isinstance(fc_payload, dict):
+            feature_md = feature_comparison_json_to_md(fc_payload)
+        else:
+            # fallback: write raw output if not valid JSON
+            feature_md = str(raw_feature_output or "")
+
+        feature_md_path = os.path.join(outputs_dir, "feature_comparison.md")
+        with open(feature_md_path, "w", encoding="utf-8") as f:
+            f.write(feature_md)
+        files_written.append(feature_md_path)
+
+        # ---- Markdown reports (excluding review_sentiment.md because we generate it from JSON) ----
         md_map = {
             "research_plan.md": getattr(planning_task, "output", ""),
             "customer_analysis.md": getattr(persona_task, "output", ""),
-            "feature_comparison.md": feature_output or "",
             "final_market_strategy_report.md": getattr(synthesis_task, "output", ""),
         }
 
@@ -186,7 +273,7 @@ def run_analysis(
                     f.write(str(content))
                 files_written.append(path)
 
-        # ---- Sentiment (SINGLE SOURCE OF TRUTH) ----
+        # ---- Sentiment: SINGLE SOURCE OF TRUTH ----
         sentiment_payload = _safe_json_loads(str(getattr(review_task, "output", ""))) or {
             "product": product_name,
             "sentiment": {"positive": 60, "negative": 30, "neutral": 10},
@@ -195,14 +282,11 @@ def run_analysis(
             "sample_quotes": {"positive": [], "negative": []},
         }
 
-        # sentiment_metrics.json (used by charts)
-        sentiment_metrics = sentiment_payload["sentiment"]
+        sentiment_metrics = sentiment_payload.get("sentiment", {"positive": 60, "negative": 30, "neutral": 10})
         sentiment_json_path = os.path.join(outputs_dir, "sentiment_metrics.json")
-        with open(sentiment_json_path, "w", encoding="utf-8") as f:
-            json.dump(sentiment_metrics, f, indent=2)
+        _write_json(sentiment_json_path, sentiment_metrics)
         files_written.append(sentiment_json_path)
 
-        # review_sentiment.md (derived from SAME JSON)
         review_md_path = _write_review_sentiment_md(outputs_dir, sentiment_payload)
         files_written.append(review_md_path)
 
@@ -212,28 +296,28 @@ def run_analysis(
             "currency": "USD",
             "prices": [],
         }
-        with open(os.path.join(outputs_dir, "competitor_prices.json"), "w", encoding="utf-8") as f:
-            json.dump(pricing_json, f, indent=2)
-        files_written.append(os.path.join(outputs_dir, "competitor_prices.json"))
+        prices_path = os.path.join(outputs_dir, "competitor_prices.json")
+        _write_json(prices_path, pricing_json)
+        files_written.append(prices_path)
 
         scores_json = _safe_json_loads(str(getattr(feature_scores_task, "output", ""))) or {
             "product": product_name,
             "scores": [],
         }
-        with open(os.path.join(outputs_dir, "feature_scores.json"), "w", encoding="utf-8") as f:
-            json.dump(scores_json, f, indent=2)
-        files_written.append(os.path.join(outputs_dir, "feature_scores.json"))
+        scores_path = os.path.join(outputs_dir, "feature_scores.json")
+        _write_json(scores_path, scores_json)
+        files_written.append(scores_path)
 
         growth_json = _safe_json_loads(str(getattr(growth_task, "output", ""))) or {
             "industry": industry,
             "geography": geography,
             "years": ["2023", "2024", "2025", "2026"],
             "growth_percent": [12, 18, 24, 33],
-            "rationale": "Fallback growth curve.",
+            "rationale": "Fallback growth curve used because AI JSON was unavailable.",
         }
-        with open(os.path.join(outputs_dir, "market_growth.json"), "w", encoding="utf-8") as f:
-            json.dump(growth_json, f, indent=2)
-        files_written.append(os.path.join(outputs_dir, "market_growth.json"))
+        growth_path = os.path.join(outputs_dir, "market_growth.json")
+        _write_json(growth_path, growth_json)
+        files_written.append(growth_path)
 
         return {
             "success": True,
@@ -249,4 +333,5 @@ def run_analysis(
 
 if __name__ == "__main__":
     run_analysis()
+
 
