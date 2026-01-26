@@ -64,8 +64,9 @@ if len(features_list) < 3:
 # 🧹 Prepare Output Folder
 # ==========================================
 output_dir = "outputs"
-if os.path.exists(output_dir):
-    shutil.rmtree(output_dir)
+
+# ✅ Never delete outputs on every rerun (Streamlit reruns constantly)
+# Only ensure it exists.
 os.makedirs(output_dir, exist_ok=True)
 
 
@@ -73,21 +74,18 @@ os.makedirs(output_dir, exist_ok=True)
 # 🚀 Run Market Research Analysis (FIXED)
 # ==========================================
 if st.button("🚀 Run Market Research Analysis"):
-    with st.spinner("Running AI-driven market analysis... please wait 1–2 minutes."):
+    with st.spinner("Running AI-driven market analysis..."):
+        # Clean outputs only when starting a run
+        if os.path.exists(output_dir):
+            shutil.rmtree(output_dir, ignore_errors=True)
+        os.makedirs(output_dir, exist_ok=True)
+
         try:
-            result = run_analysis(
-                product_name=product_name,
-                industry=industry
-            )
-
-            st.success(f"✅ Analysis completed successfully for **{product_name}**!")
-
+            result = run_analysis(product_name=product_name, industry=industry)
+            st.success("✅ Analysis completed successfully!")
         except Exception as e:
             st.error("❌ Error running analysis")
-            st.code(traceback.format_exc())
-
-
-st.markdown("---")
+            st.exception(e)
 
 
 # ==========================================
