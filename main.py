@@ -9,9 +9,6 @@ from agents import MarketResearchAgents
 from tasks import MarketResearchTasks
 from tools.feature_comparison import FeatureComparisonTool
 
-# ----------------------------------------
-# Logging
-# ----------------------------------------
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 logging.basicConfig(
     level=getattr(logging, LOG_LEVEL, logging.INFO),
@@ -20,9 +17,6 @@ logging.basicConfig(
 logger = logging.getLogger("MarketMind")
 
 
-# ----------------------------------------
-# Helpers
-# ----------------------------------------
 def _safe_json_loads(text: str) -> Optional[dict]:
     try:
         return json.loads(text)
@@ -100,16 +94,11 @@ def feature_comparison_json_to_md(payload: dict) -> str:
         md.append(f"**Summary:** {summary}\n")
 
     md.append("## Comparison Table\n")
-
     if not table:
         md.append("_No comparison table generated._\n")
         return "\n".join(md)
 
     cols = [k for k in table[0].keys() if k != "feature"]
-    if not cols:
-        md.append("_Comparison table missing product columns._\n")
-        return "\n".join(md)
-
     md.append("| Feature | " + " | ".join(cols) + " |")
     md.append("|---|" + "|".join(["---"] * len(cols)) + "|")
 
@@ -133,21 +122,20 @@ def patch_price_row_from_competitor_prices(
     competitors: List[str],
 ) -> dict:
     """
-    Overwrite the 'Price' row in feature comparison table using competitor_prices.json.
-    Works when columns are either:
-      - real names (Notion, Asana, etc.)
-      - generic names (Competitor A, Competitor B, ...)
+    Overwrites Price row using competitor_prices.json.
+    Supports real column names AND generic Competitor A/B/C.
+    Also case-insensitive so it doesn't miss.
     """
     if not fc_payload or "comparison_table" not in fc_payload:
         return fc_payload
 
-    # Build name -> price map
+    # lowercase map for matching
     price_map: Dict[str, Any] = {}
     for item in pricing_json.get("prices", []):
-        name = str(item.get("name", "")).strip()
-        price = item.get("price", None)
-        if name:
-            price_map[name] = price
+        nm = str(item.get("name", "")).strip()
+        pr = item.get("price", None)
+        if nm:
+            price_map[nm.lower()] = pr
 
     def fmt(p: Any) -> str:
         if p is None or p == "":
@@ -157,40 +145,46 @@ def patch_price_row_from_competitor_prices(
         except Exception:
             return _normalize_price(p)
 
-    # Competitor A -> competitors[0], Competitor B -> competitors[1], etc.
+    # generic mapping: Competitor A -> competitors[0], etc.
     generic_map: Dict[str, str] = {}
     for i, comp in enumerate(competitors):
-        generic_map[f"Competitor {chr(ord('A') + i)}"] = comp
+        generic_map[f"competitor {chr(ord('a') + i)}"] = comp.lower()
 
+    # locate the price row
     for row in fc_payload["comparison_table"]:
         feat = str(row.get("feature", "")).strip().lower()
         if feat in {"price", "pricing"}:
             for col in list(row.keys()):
                 if col == "feature":
                     continue
+                col_key = str(col).strip().lower()
 
-                # Case 1: Column is actual name
-                if col == product_name and product_name in price_map:
-                    row[col] = fmt(price_map[product_name])
-                    continue
-                if col in price_map:
-                    row[col] = fmt(price_map[col])
+                # Case 1: real name column
+                if col_key in price_map:
+                    row[col] = fmt(price_map[col_key])
                     continue
 
-                # Case 2: Column is generic "Competitor A/B/C"
-                if col in generic_map:
-                    real_name = generic_map[col]
-                    if real_name in price_map:
-                        row[col] = fmt(price_map[real_name])
+                # Case 2: generic Competitor A/B/C
+                if col_key in generic_map:
+                    real_key = generic_map[col_key]
+                    if real_key in price_map:
+                        row[col] = fmt(price_map[real_key])
 
+            # ensure main product is set even if column name differs slightly
+            # (only if there is a column that "looks like" the product name)
+            prod_key = product_name.strip().lower()
+            if prod_key in price_map:
+                for col in list(row.keys()):
+                    if col == "feature":
+                        continue
+                    if col.strip().lower() == prod_key:
+                        row[col] = fmt(price_map[prod_key])
+                        break
             break
 
     return fc_payload
 
 
-# ----------------------------------------
-# Main analysis
-# ----------------------------------------
 def run_analysis(
     product_name: Optional[str] = None,
     industry: Optional[str] = None,
@@ -271,15 +265,14 @@ def run_analysis(
         pricing_json = _safe_json_loads(str(getattr(pricing_task, "output", ""))) or {
             "product": product_name,
             "currency": "USD",
-            "prices": [],
+            "prices": [{"name": product_name, "price": 0}],
         }
         prices_path = os.path.join(outputs_dir, "competitor_prices.json")
         _write_json(prices_path, pricing_json)
         files_written.append(prices_path)
 
-        # ---- Feature comparison: parse tool output -> patch price row -> markdown ----
+        # ---- Feature comparison -> patch Price row -> markdown ----
         fc_payload = _safe_json_loads(str(raw_feature_output)) if raw_feature_output else None
-
         if fc_payload and isinstance(fc_payload, dict):
             fc_payload = patch_price_row_from_competitor_prices(
                 fc_payload,
@@ -296,7 +289,7 @@ def run_analysis(
             f.write(feature_md)
         files_written.append(feature_md_path)
 
-        # ---- Feature scores ----
+        # ---- Feature scores JSON (flat schema) ----
         scores_json = _safe_json_loads(str(getattr(feature_scores_task, "output", ""))) or {
             "product": product_name,
             "scores": [],
@@ -305,19 +298,19 @@ def run_analysis(
         _write_json(scores_path, scores_json)
         files_written.append(scores_path)
 
-        # ---- Market growth ----
+        # ---- Market growth JSON ----
         growth_json = _safe_json_loads(str(getattr(growth_task, "output", ""))) or {
             "industry": industry,
             "geography": geography,
             "years": ["2023", "2024", "2025", "2026"],
             "growth_percent": [12, 18, 24, 33],
-            "rationale": "Fallback growth curve used because AI JSON was unavailable.",
+            "rationale": "Fallback growth curve.",
         }
         growth_path = os.path.join(outputs_dir, "market_growth.json")
         _write_json(growth_path, growth_json)
         files_written.append(growth_path)
 
-        # ---- Sentiment single source of truth ----
+        # ---- Sentiment (single source of truth) ----
         sentiment_payload = _safe_json_loads(str(getattr(review_task, "output", ""))) or {
             "product": product_name,
             "sentiment": {"positive": 60, "negative": 30, "neutral": 10},
