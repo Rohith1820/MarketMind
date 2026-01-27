@@ -50,7 +50,7 @@ with st.expander("⚙️ Configure Product Details", expanded=True):
         industry = st.text_input("Industry", "Consumer Goods")
         scale = st.selectbox("Business Scale", ["Startup", "SME", "Enterprise"], index=1)
 
-    st.markdown("### 🧩 Custom Comparison Inputs (customer-entered)")
+    st.markdown("### 🧩 Custom Comparison Inputs")
     competitors_raw = st.text_input(
         "Competitors (comma-separated)",
         "HidrateSpark Pro, LARQ Bottle PureVis, Ozmo Smart Bottle"
