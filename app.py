@@ -167,39 +167,51 @@ st.markdown("---")
 # ----------------------------
 # Feature Radar 
 # ----------------------------
-st.subheader("⚙️ Feature Comparison Radar (AI-Scored)")
+st.subheader("⚙️ Feature Comparison Radar")
 
-if not scores_json:
-    st.info("Run analysis to generate AI feature scores.")
+scores_json = safe_load_json(os.path.join(OUTPUT_DIR, "feature_scores.json"))
+rows = (scores_json or {}).get("scores", [])
+
+if not rows:
+    st.info("No AI feature scores found. Try running analysis again.")
 else:
-    # expected format: {"scores":[{"product":"X","feature":"Y","score":7}, ...]}
-    df_scores = pd.DataFrame(scores_json.get("scores", []))
-    if not df_scores.empty:
-        df_scores = df_scores.rename(columns={"product": "Product", "feature": "Feature", "score": "Score"})
-        df_scores["Score"] = pd.to_numeric(df_scores["Score"], errors="coerce")
-        df_scores = df_scores.dropna(subset=["Score"])
+    # Create DataFrame
+    df_scores = pd.DataFrame(rows)
 
-        allowed_products = set([product_name] + competitors_list)
-        allowed_features = set(features_list)
+    # Normalize column names just in case
+    df_scores.columns = [c.strip().lower() for c in df_scores.columns]
 
-        df_scores = df_scores[df_scores["Product"].isin(allowed_products)]
-        df_scores = df_scores[df_scores["Feature"].isin(allowed_features)]
-
-    if df_scores.empty:
-        st.warning("No AI feature scores found. Try running analysis again.")
-    else:
-        fig_radar = px.line_polar(
-            df_scores,
-            r="Score",
-            theta="Feature",
-            color="Product",
-            line_close=True,
-            title=f"Feature Comparison: {product_name} vs Selected Competitors"
+    # Ensure required columns exist
+    required = {"product", "feature", "score"}
+    if not required.issubset(set(df_scores.columns)):
+        st.error(
+            f"feature_scores.json is missing required fields. Found columns: {list(df_scores.columns)}"
         )
-        fig_radar.update_traces(fill="toself", opacity=0.55)
-        st.plotly_chart(fig_radar, use_container_width=True)
+    else:
+        # Clean
+        df_scores["score"] = pd.to_numeric(df_scores["score"], errors="coerce")
+        df_scores = df_scores.dropna(subset=["score"])
 
-st.markdown("---")
+        # Filter to selected products only
+        selected_products = [product_name] + competitors
+        df_scores = df_scores[df_scores["product"].isin(selected_products)]
+        df_scores = df_scores[df_scores["feature"].isin(features)]
+
+        if df_scores.empty:
+            st.info("No AI feature scores found for your selected competitors/features. Run analysis again.")
+        else:
+            # Radar chart expects long-form
+            fig3 = px.line_polar(
+                df_scores,
+                r="score",
+                theta="feature",
+                color="product",
+                line_close=True,
+                title=f"Feature Comparison: {product_name} vs Selected Competitors"
+            )
+            fig3.update_traces(fill="toself", opacity=0.55)
+            st.plotly_chart(fig3, use_container_width=True)
+
 
 # ----------------------------
 # Market Growth Trend 
