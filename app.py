@@ -1,18 +1,14 @@
 import os
 import json
+import shutil
 import pandas as pd
 import plotly.express as px
 import streamlit as st
 
 from main import run_analysis
 
-# ----------------------------
-# Helpers
-# ----------------------------
-def parse_csv(s: str):
-    if not s:
-        return []
-    return [x.strip() for x in s.split(",") if x.strip()]
+OUTPUT_DIR = "outputs"
+
 
 def safe_load_json(path: str):
     try:
@@ -22,6 +18,23 @@ def safe_load_json(path: str):
             return json.load(f)
     except Exception:
         return None
+
+
+def parse_csv_list(text: str):
+    # accepts comma or newline separated
+    items = []
+    for part in text.replace("\n", ",").split(","):
+        p = part.strip()
+        if p:
+            items.append(p)
+    # de-duplicate preserving order
+    seen = set()
+    out = []
+    for x in items:
+        if x.lower() not in seen:
+            out.append(x)
+            seen.add(x.lower())
+    return out
 
 
 # ----------------------------
