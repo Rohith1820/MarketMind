@@ -31,9 +31,10 @@ def parse_csv_list(text: str):
     seen = set()
     out = []
     for x in items:
-        if x.lower() not in seen:
+        key = x.lower()
+        if key not in seen:
             out.append(x)
-            seen.add(x.lower())
+            seen.add(key)
     return out
 
 
@@ -49,9 +50,7 @@ MarketMind generates **AI-driven market research reports** and dynamic dashboard
 including competitor intelligence, sentiment insights, and growth projections.
 """)
 
-
 # IMPORTANT: never delete outputs at top-level (Streamlit reruns constantly)
-OUTPUT_DIR = "outputs"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 with st.expander("⚙️ Configure Product Details", expanded=True):
@@ -70,11 +69,12 @@ with st.expander("⚙️ Configure Product Details", expanded=True):
     )
     features_raw = st.text_input(
         "Features (comma-separated)",
-        "Design, Performance, Battery, Integration, Price Value"
+        "Design, Performance, Battery, Integration, Price"
     )
 
-    competitors_list = parse_csv(competitors_raw)
-    features_list = parse_csv(features_raw)
+    # ✅ FIX: use the correct function name
+    competitors_list = parse_csv_list(competitors_raw)
+    features_list = parse_csv_list(features_raw)
 
     if len(competitors_list) == 0:
         st.warning("Enter at least 1 competitor.")
@@ -89,7 +89,11 @@ st.markdown("---")
 if st.button("🚀 Run Market Research Analysis"):
     with st.spinner("Running AI analysis... this can take 1–3 minutes."):
 
-        # Pass inputs into analysis through function args
+        # ✅ Clear outputs ONLY when button is clicked (optional but recommended)
+        if os.path.exists(OUTPUT_DIR):
+            shutil.rmtree(OUTPUT_DIR)
+        os.makedirs(OUTPUT_DIR, exist_ok=True)
+
         try:
             result = run_analysis(
                 product_name=product_name,
@@ -126,9 +130,9 @@ st.subheader("💬 Customer Sentiment Overview")
 if not sentiment_json:
     st.info("Run analysis to generate sentiment metrics.")
 else:
-    pos = sentiment_json.get("positive", 60)
-    neg = sentiment_json.get("negative", 30)
-    neu = sentiment_json.get("neutral", 10)
+    pos = int(sentiment_json.get("positive", 60))
+    neg = int(sentiment_json.get("negative", 30))
+    neu = int(sentiment_json.get("neutral", 10))
 
     df_sentiment = pd.DataFrame({
         "Sentiment": ["Positive", "Negative", "Neutral"],
@@ -154,25 +158,28 @@ if not prices_json:
     st.info("Run analysis to generate AI competitor pricing.")
 else:
     df_price = pd.DataFrame(prices_json.get("prices", []))
+
     if not df_price.empty:
         df_price = df_price.rename(columns={"name": "Competitor", "price": "Price ($)"})
         df_price["Price ($)"] = pd.to_numeric(df_price["Price ($)"], errors="coerce")
         df_price = df_price.dropna(subset=["Price ($)"])
 
-        # Filter to exactly what user entered
-        allowed = set(competitors_list)
+        # ✅ include main product + competitors the user entered
+        allowed = set([product_name] + competitors_list)
         df_price = df_price[df_price["Competitor"].isin(allowed)]
 
     if df_price.empty:
-        st.warning("No AI prices found for the entered competitors.")
+        st.warning("No AI prices found for the entered competitors (or product).")
     else:
         fig_price = px.bar(
             df_price,
             x="Competitor",
             y="Price ($)",
-            title=f"Competitor Pricing for {product_name}",
+            title=f"Pricing for {product_name} vs Competitors",
             color="Competitor"
         )
+        # ✅ remove value labels on bars (hover only)
+        fig_price.update_traces(text=None, hovertemplate="$%{y}<extra></extra>")
         st.plotly_chart(fig_price, use_container_width=True)
 
 st.markdown("---")
@@ -188,32 +195,27 @@ rows = (scores_json or {}).get("scores", [])
 if not rows:
     st.info("No AI feature scores found. Try running analysis again.")
 else:
-    # Create DataFrame
     df_scores = pd.DataFrame(rows)
-
-    # Normalize column names just in case
     df_scores.columns = [c.strip().lower() for c in df_scores.columns]
 
-    # Ensure required columns exist
     required = {"product", "feature", "score"}
     if not required.issubset(set(df_scores.columns)):
-        st.error(
-            f"feature_scores.json is missing required fields. Found columns: {list(df_scores.columns)}"
-        )
+        st.error(f"feature_scores.json missing required fields. Found: {list(df_scores.columns)}")
     else:
-        # Clean
         df_scores["score"] = pd.to_numeric(df_scores["score"], errors="coerce")
         df_scores = df_scores.dropna(subset=["score"])
 
-        # Filter to selected products only
-        selected_products = [product_name] + competitors
+        # ✅ FIX: use the correct variables
+        selected_products = [product_name] + competitors_list
         df_scores = df_scores[df_scores["product"].isin(selected_products)]
-        df_scores = df_scores[df_scores["feature"].isin(features)]
+
+        # only filter by features if user entered them
+        if features_list:
+            df_scores = df_scores[df_scores["feature"].isin(features_list)]
 
         if df_scores.empty:
-            st.info("No AI feature scores found for your selected competitors/features. Run analysis again.")
+            st.info("No AI feature scores match your selected competitors/features. Run analysis again.")
         else:
-            # Radar chart expects long-form
             fig3 = px.line_polar(
                 df_scores,
                 r="score",
@@ -224,7 +226,6 @@ else:
             )
             fig3.update_traces(fill="toself", opacity=0.55)
             st.plotly_chart(fig3, use_container_width=True)
-
 
 # ----------------------------
 # Market Growth Trend 
@@ -240,7 +241,7 @@ else:
     if not years or not growth or len(years) != len(growth):
         st.warning("Market growth JSON is incomplete.")
     else:
-        df_growth = pd.DataFrame({"Year": years, "Market Growth (%)": growth})
+        df_growth = pd.DataFrame({"Year": [str(y) for y in years], "Market Growth (%)": growth})
         fig_growth = px.line(
             df_growth,
             x="Year",
@@ -273,6 +274,7 @@ if os.path.exists(OUTPUT_DIR):
                 st.markdown(content)
     else:
         st.info("No markdown reports found yet. Run analysis first.")
+
 # ==========================================
 # 📘 Sidebar — How to Use
 # ==========================================
@@ -280,15 +282,9 @@ st.sidebar.header("ℹ️ How to Use MarketMind")
 
 st.sidebar.markdown("""
 ### 📌 Steps to Run the Analysis
-
 1. **Enter your product details**
-2. **Click 'Run Market Research Analysis'**
-3. Dashboard visuals update automatically
-4. Scroll down to download your reports
+2. **Enter competitors + features**
+3. **Click 'Run Market Research Analysis'**
+4. Scroll down to view charts and reports
+""")
 
----
-
-### 💡 Tips
-- Try different industries to get different competitor profiles.
-- Use reports directly in presentations or decks.
-""") 
