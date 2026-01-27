@@ -286,5 +286,11 @@ st.sidebar.markdown("""
 2. **Enter competitors + features**
 3. **Click 'Run Market Research Analysis'**
 4. Scroll down to view charts and reports
+---
+
+### 💡 Tips
+- Try different industries to get different competitor profiles.
+- Use reports directly in presentations or decks.
+
 """)
 
