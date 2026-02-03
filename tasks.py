@@ -155,3 +155,57 @@ class MarketResearchTasks:
             agent=agent,
             context=context_tasks,
         )
+
+    def feature_scores_json_task(self, agent, product_name, industry, competitors: List[str], features: List[str]):
+        comps = ", ".join(competitors) if competitors else ""
+        feats = ", ".join(features) if features else ""
+
+        return Task(
+            description=(
+                f"Generate numeric feature scores (0-10) for a radar chart.\n"
+                f"Product: {product_name}\n"
+                f"Industry: {industry}\n"
+                f"Competitors: {comps}\n"
+                f"Features: {feats}\n\n"
+                "CRITICAL RULES:\n"
+                "- Use ONLY the provided competitor names.\n"
+                "- Use ONLY the provided features. Do NOT introduce new features.\n"
+                "- If a feature is not applicable to this category, score it as 0 and add a note.\n"
+                "- Output STRICT JSON ONLY.\n\n"
+                "Return JSON in this exact shape:\n"
+                "{\n"
+                '  "product": "…",\n'
+                '  "competitors": ["…"],\n'
+                '  "features": ["…"],\n'
+                '  "scores": [\n'
+                '    {"product": "Product Name", "feature": "Feature Name", "score": 0, "note": ""}\n'
+                "  ]\n"
+                "}\n"
+            ),
+            expected_output="Strict JSON only.",
+            agent=agent,
+        )
+
+    def market_growth_json_task(self, agent, product_name, industry, competitors: List[str], geography: str):
+        comps = ", ".join(competitors) if competitors else ""
+        return Task(
+            description=(
+                f"Estimate market growth trend for the industry.\n"
+                f"Industry: {industry}\n"
+                f"Geography: {geography}\n"
+                f"Competitor context: {comps}\n\n"
+                "Return STRICT JSON ONLY:\n"
+                "{\n"
+                f'  "industry": "{industry}",\n'
+                f'  "geography": "{geography}",\n'
+                '  "years": ["2023","2024","2025","2026"],\n'
+                '  "growth_percent": [0,0,0,0],\n'
+                '  "rationale": "1-2 lines"\n'
+                "}\n\n"
+                "Rules:\n"
+                "- growth_percent must be numbers.\n"
+                "- Keep the rationale cautious and generic; do not invent citations.\n"
+            ),
+            expected_output="Strict JSON only.",
+            agent=agent,
+        )
