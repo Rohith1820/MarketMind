@@ -1,6 +1,5 @@
 import os
 import json
-import shutil
 import pandas as pd
 import plotly.express as px
 import streamlit as st
@@ -21,20 +20,19 @@ def safe_load_json(path: str):
 
 
 def parse_csv_list(text: str):
-    # accepts comma or newline separated
     items = []
-    for part in text.replace("\n", ",").split(","):
+    for part in (text or "").replace("\n", ",").split(","):
         p = part.strip()
         if p:
             items.append(p)
-    # de-duplicate preserving order
+    # de-dupe
     seen = set()
     out = []
     for x in items:
-        key = x.lower()
-        if key not in seen:
+        k = x.lower()
+        if k not in seen:
             out.append(x)
-            seen.add(key)
+            seen.add(k)
     return out
 
 
@@ -50,29 +48,29 @@ MarketMind generates **AI-driven market research reports** and dynamic dashboard
 including competitor intelligence, sentiment insights, and growth projections.
 """)
 
-# IMPORTANT: never delete outputs at top-level (Streamlit reruns constantly)
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 with st.expander("⚙️ Configure Product Details", expanded=True):
     col1, col2 = st.columns(2)
     with col1:
-        product_name = st.text_input("Product Name", "EcoWave Smart Bottle")
+        product_name = st.text_input("Product Name", "Lao Gan Ma Chili Crisp")
         geography = st.text_input("Target Geography", "US")
     with col2:
-        industry = st.text_input("Industry", "Consumer Goods")
+        industry = st.text_input("Industry", "Food & Beverage")
         scale = st.selectbox("Business Scale", ["Startup", "SME", "Enterprise"], index=1)
 
     st.markdown("### 🧩 Custom Comparison Inputs")
-    competitors_raw = st.text_input(
-        "Competitors (comma-separated)",
-        "HidrateSpark Pro, LARQ Bottle PureVis, Ozmo Smart Bottle"
+    competitors_raw = st.text_area(
+        "Competitors (comma or newline separated)",
+        "Fly By Jing Sichuan Chili Crisp,\nMomofuku Chili Crunch,\nTrader Joe’s Chili Onion Crunch",
+        height=90
     )
-    features_raw = st.text_input(
-        "Features (comma-separated)",
-        "Design, Performance, Battery, Integration, Price"
+    features_raw = st.text_area(
+        "Features (comma or newline separated)",
+        "Ingredients,\nSpice Level,\nTexture,\nFlavor Profile,\nPackaging,\nPrice",
+        height=110
     )
 
-    # ✅ FIX: use the correct function name
     competitors_list = parse_csv_list(competitors_raw)
     features_list = parse_csv_list(features_raw)
 
@@ -87,13 +85,7 @@ st.markdown("---")
 # Run Analysis
 # ----------------------------
 if st.button("🚀 Run Market Research Analysis"):
-    with st.spinner("Running AI analysis... this can take 1–3 minutes."):
-
-        # ✅ Clear outputs ONLY when button is clicked (optional but recommended)
-        if os.path.exists(OUTPUT_DIR):
-            shutil.rmtree(OUTPUT_DIR)
-        os.makedirs(OUTPUT_DIR, exist_ok=True)
-
+    with st.spinner("Running analysis... this can take 1–3 minutes."):
         try:
             result = run_analysis(
                 product_name=product_name,
@@ -104,100 +96,109 @@ if st.button("🚀 Run Market Research Analysis"):
                 features=features_list
             )
             st.success("✅ Analysis completed successfully!")
-            st.json({
-                "outputs_dir": result.get("outputs_dir"),
-                "files_written": result.get("files_written", [])
-            })
+
+            with st.expander("Files written", expanded=False):
+                st.json(result)
+
         except Exception as e:
-            st.error("❌ Error running analysis. Check logs in Render.")
+            st.error("❌ Error running analysis. Check Render logs.")
             st.exception(e)
 
 st.markdown("---")
 
 # ----------------------------
-# Load AI JSON outputs
+# Load outputs
 # ----------------------------
+sources_meta = safe_load_json(os.path.join(OUTPUT_DIR, "sources.json")) or {}
+sentiment_json = safe_load_json(os.path.join(OUTPUT_DIR, "sentiment_metrics.json"))
 prices_json = safe_load_json(os.path.join(OUTPUT_DIR, "competitor_prices.json"))
 scores_json = safe_load_json(os.path.join(OUTPUT_DIR, "feature_scores.json"))
 growth_json = safe_load_json(os.path.join(OUTPUT_DIR, "market_growth.json"))
-sentiment_json = safe_load_json(os.path.join(OUTPUT_DIR, "sentiment_metrics.json"))
 
-# ==========================================
-# 💬 Sentiment Analysis Visualization
-# ==========================================
+# ----------------------------
+# Sentiment
+# ----------------------------
 st.subheader("💬 Customer Sentiment Overview")
+st.caption(f"Sources used for sentiment: {sources_meta.get('sources_count', 0)} (quotes shown only if verified)")
 
 if not sentiment_json:
     st.info("Run analysis to generate sentiment metrics.")
 else:
-    pos = int(sentiment_json.get("positive", 60))
-    neg = int(sentiment_json.get("negative", 30))
-    neu = int(sentiment_json.get("neutral", 10))
+    pos = int(sentiment_json.get("positive", 0))
+    neg = int(sentiment_json.get("negative", 0))
+    neu = int(sentiment_json.get("neutral", 0))
 
-    df_sentiment = pd.DataFrame({
-        "Sentiment": ["Positive", "Negative", "Neutral"],
-        "Percentage": [pos, neg, neu]
-    })
-
-    fig1 = px.pie(
-        df_sentiment,
-        names="Sentiment",
-        values="Percentage",
-        hole=0.3,
-        title=f"Sentiment Breakdown for {product_name}"
-    )
-    fig1.update_traces(textinfo="percent+label")
-    st.plotly_chart(fig1, use_container_width=True)
-
-# ----------------------------
-# Competitor Pricing Chart 
-# ----------------------------
-st.subheader("💰 Competitor Pricing Overview (AI-Fetched)")
-
-if not prices_json:
-    st.info("Run analysis to generate AI competitor pricing.")
-else:
-    df_price = pd.DataFrame(prices_json.get("prices", []))
-
-    if not df_price.empty:
-        df_price = df_price.rename(columns={"name": "Competitor", "price": "Price ($)"})
-        df_price["Price ($)"] = pd.to_numeric(df_price["Price ($)"], errors="coerce")
-        df_price = df_price.dropna(subset=["Price ($)"])
-
-        # ✅ include main product + competitors the user entered
-        allowed = set([product_name] + competitors_list)
-        df_price = df_price[df_price["Competitor"].isin(allowed)]
-
-    if df_price.empty:
-        st.warning("No AI prices found for the entered competitors (or product).")
+    if pos == 0 and neg == 0 and neu == 0:
+        st.warning("Sentiment is UNVERIFIED (not enough product-linked scraped text). See review_sentiment.md for details.")
     else:
-        fig_price = px.bar(
-            df_price,
-            x="Competitor",
-            y="Price ($)",
-            title=f"Pricing for {product_name} vs Competitors",
-            color="Competitor"
+        df_sentiment = pd.DataFrame({
+            "Sentiment": ["Positive", "Negative", "Neutral"],
+            "Percentage": [pos, neg, neu]
+        })
+
+        fig1 = px.pie(
+            df_sentiment,
+            names="Sentiment",
+            values="Percentage",
+            hole=0.3,
+            title=f"Sentiment Breakdown for {product_name}"
         )
-        # ✅ remove value labels on bars (hover only)
-        fig_price.update_traces(text=None, hovertemplate="$%{y}<extra></extra>")
-        st.plotly_chart(fig_price, use_container_width=True)
+        fig1.update_traces(textinfo="percent+label")
+        st.plotly_chart(fig1, use_container_width=True)
 
 st.markdown("---")
 
 # ----------------------------
-# Feature Radar 
+# Competitor Pricing
+# ----------------------------
+st.subheader("💰 Competitor Pricing Overview (AI-Estimated)")
+
+if not prices_json:
+    st.info("Run analysis to generate AI competitor pricing.")
+else:
+    rows = prices_json.get("prices", []) or []
+    df_price = pd.DataFrame(rows)
+    if df_price.empty:
+        st.warning("No pricing rows found.")
+    else:
+        df_price = df_price.rename(columns={"name": "Competitor", "price": "Price ($)"})
+        df_price["Price ($)"] = pd.to_numeric(df_price["Price ($)"], errors="coerce")
+        df_price = df_price.dropna(subset=["Price ($)"])
+
+        # Keep only competitors user entered (optional)
+        allowed = set([c.strip() for c in competitors_list])
+        if allowed:
+            df_price = df_price[df_price["Competitor"].isin(allowed)]
+
+        if df_price.empty:
+            st.warning("No AI prices found for the entered competitors.")
+        else:
+            fig_price = px.bar(
+                df_price,
+                x="Competitor",
+                y="Price ($)",
+                title=f"Competitor Pricing for {product_name}",
+                color="Competitor",
+            )
+            # remove value labels on bars (your request)
+            fig_price.update_traces(text=None)
+            st.plotly_chart(fig_price, use_container_width=True)
+
+st.markdown("---")
+
+# ----------------------------
+# Feature Radar
 # ----------------------------
 st.subheader("⚙️ Feature Comparison Radar")
 
-scores_json = safe_load_json(os.path.join(OUTPUT_DIR, "feature_scores.json"))
-rows = (scores_json or {}).get("scores", [])
-
+rows = (scores_json or {}).get("scores", []) if scores_json else []
 if not rows:
-    st.info("No AI feature scores found. Try running analysis again.")
+    st.info("No AI feature scores found. Try running analysis again (ensure OPENAI_API_KEY is set).")
 else:
     df_scores = pd.DataFrame(rows)
-    df_scores.columns = [c.strip().lower() for c in df_scores.columns]
 
+    # normalize columns
+    df_scores.columns = [c.strip().lower() for c in df_scores.columns]
     required = {"product", "feature", "score"}
     if not required.issubset(set(df_scores.columns)):
         st.error(f"feature_scores.json missing required fields. Found: {list(df_scores.columns)}")
@@ -205,16 +206,12 @@ else:
         df_scores["score"] = pd.to_numeric(df_scores["score"], errors="coerce")
         df_scores = df_scores.dropna(subset=["score"])
 
-        # ✅ FIX: use the correct variables
         selected_products = [product_name] + competitors_list
         df_scores = df_scores[df_scores["product"].isin(selected_products)]
-
-        # only filter by features if user entered them
-        if features_list:
-            df_scores = df_scores[df_scores["feature"].isin(features_list)]
+        df_scores = df_scores[df_scores["feature"].isin(features_list)]
 
         if df_scores.empty:
-            st.info("No AI feature scores match your selected competitors/features. Run analysis again.")
+            st.warning("No feature score rows match your selected competitors/features.")
         else:
             fig3 = px.line_polar(
                 df_scores,
@@ -227,27 +224,28 @@ else:
             fig3.update_traces(fill="toself", opacity=0.55)
             st.plotly_chart(fig3, use_container_width=True)
 
+st.markdown("---")
+
 # ----------------------------
-# Market Growth Trend 
+# Market Growth
 # ----------------------------
 st.subheader("📈 Market Growth Trend (AI-Estimated)")
 
 if not growth_json:
     st.info("Run analysis to generate AI market growth trend.")
 else:
-    years = growth_json.get("years", [])
-    growth = growth_json.get("growth_percent", [])
-
+    years = growth_json.get("years", []) or []
+    growth = growth_json.get("growth_percent", []) or []
     if not years or not growth or len(years) != len(growth):
         st.warning("Market growth JSON is incomplete.")
     else:
-        df_growth = pd.DataFrame({"Year": [str(y) for y in years], "Market Growth (%)": growth})
+        df_growth = pd.DataFrame({"Year": years, "Market Growth (%)": growth})
         fig_growth = px.line(
             df_growth,
             x="Year",
             y="Market Growth (%)",
             markers=True,
-            title=f"Growth Trend in {industry} (Competitor-aware)"
+            title=f"Growth Trend in {industry}"
         )
         fig_growth.update_layout(xaxis=dict(type="category"))
         st.plotly_chart(fig_growth, use_container_width=True)
@@ -259,15 +257,15 @@ else:
 
 st.markdown("---")
 
-# ==========================================
-# 📘 Full Market Research Reports
-# ==========================================
+# ----------------------------
+# Reports
+# ----------------------------
 st.subheader("📘 Full Market Research Reports")
 
 if os.path.exists(OUTPUT_DIR):
-    md_files = [f for f in os.listdir(OUTPUT_DIR) if f.endswith(".md")]
+    md_files = sorted([f for f in os.listdir(OUTPUT_DIR) if f.endswith(".md")])
     if md_files:
-        for md_file in sorted(md_files):
+        for md_file in md_files:
             with open(os.path.join(OUTPUT_DIR, md_file), "r", encoding="utf-8") as f:
                 content = f.read()
             with st.expander(f"📄 {md_file}", expanded=False):
@@ -275,22 +273,15 @@ if os.path.exists(OUTPUT_DIR):
     else:
         st.info("No markdown reports found yet. Run analysis first.")
 
-# ==========================================
-# 📘 Sidebar — How to Use
-# ==========================================
 st.sidebar.header("ℹ️ How to Use MarketMind")
-
 st.sidebar.markdown("""
-### 📌 Steps to Run the Analysis
-1. **Enter your product details**
-2. **Enter competitors + features**
-3. **Click 'Run Market Research Analysis'**
-4. Scroll down to view charts and reports
----
+### Steps
+1. Enter product + competitors + features  
+2. Click **Run Market Research Analysis**  
+3. Charts + reports refresh from `/outputs`
 
-### 💡 Tips
-- Try different industries to get different competitor profiles.
-- Use reports directly in presentations or decks.
-
+### Trust rule
+Quotes only appear when the system can verify them from scraped sources.
 """)
+
 
