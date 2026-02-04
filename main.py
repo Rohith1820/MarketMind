@@ -58,7 +58,7 @@ def _write_text(path: str, content: str) -> None:
         f.write(str(content or "").strip() + "\n")
 
 
-def _write_review_sentiment_md(outputs_dir: str, payload: dict) -> str:
+def _write_review_sentiment_md(outputs_dir: str, payload: dict, show_themes: bool = False) -> str:
     """
     Writes a clean review_sentiment.md from the SAME JSON used by the app chart.
     """
@@ -132,7 +132,7 @@ def feature_comparison_json_to_md(payload: dict) -> str:
     summary = payload.get("summary", "")
     table = payload.get("comparison_table", [])
 
-    md: List[str] = []
+    md = []
     md.append(f"# {title}\n")
     if industry:
         md.append(f"**Industry:** {industry}\n")
@@ -150,12 +150,7 @@ def feature_comparison_json_to_md(payload: dict) -> str:
 
     for row in table:
         feat = str(row.get("feature", "")).strip()
-        values = []
-        for c in cols:
-            v = row.get(c, "")
-            if feat.lower() in {"price", "pricing"}:
-                v = _normalize_price(v)
-            values.append(str(v).strip())
+        values = [str(row.get(c, "")).strip() for c in cols]
         md.append("| " + feat + " | " + " | ".join(values) + " |")
 
     return "\n".join(md) + "\n"
