@@ -2,18 +2,11 @@ import os
 import json
 import logging
 import traceback
-from typing import Optional, Dict, Any, List, Callable
+from typing import Optional, Dict, Any, List
 
 from crewai import Crew
 from agents import MarketResearchAgents
 from tasks import MarketResearchTasks
-
-# If you still use this tool, keep it. If not, you can remove it safely.
-try:
-    from tools.feature_comparison import FeatureComparisonTool
-except Exception:
-    FeatureComparisonTool = None
-
 
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 logging.basicConfig(
@@ -22,22 +15,19 @@ logging.basicConfig(
 )
 logger = logging.getLogger("MarketMind")
 
-OUTPUT_DIR = "outputs"
 
-
-# ----------------------------
-# Helpers
-# ----------------------------
+# -------------------------
+# helpers
+# -------------------------
 def _safe_json_loads(text: str) -> Optional[dict]:
     try:
-        if text is None:
-            return None
         return json.loads(text)
     except Exception:
         return None
 
 
 def _write_json(path: str, payload: dict) -> None:
+    os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w", encoding="utf-8") as f:
         json.dump(payload, f, indent=2)
 
@@ -53,80 +43,11 @@ def _normalize_price(val: Any) -> str:
         return f"${s}"
 
 
-def _write_text(path: str, content: str) -> None:
-    with open(path, "w", encoding="utf-8") as f:
-        f.write(str(content or "").strip() + "\n")
-
-
-def _write_review_sentiment_md(outputs_dir: str, payload: dict, show_themes: bool = False) -> str:
-    """
-    Writes a clean review_sentiment.md from the SAME JSON used by the app chart.
-    """
-    sentiment = payload.get("sentiment", {})
-    pos = int(sentiment.get("positive", 60))
-    neg = int(sentiment.get("negative", 30))
-    neu = int(sentiment.get("neutral", 10))
-
-    themes = payload.get("themes", {})
-    pos_themes = themes.get("positive", []) or payload.get("top_positive_themes", []) or []
-    neg_themes = themes.get("negative", []) or payload.get("top_negative_themes", []) or []
-    quotes = payload.get("quotes", []) or payload.get("sample_quotes", {})
-
-    lines: List[str] = []
-    lines.append("# Review Sentiment Summary\n")
-    lines.append(f"**Positive:** {pos}%  ")
-    lines.append(f"**Negative:** {neg}%  ")
-    lines.append(f"**Neutral:** {neu}%\n")
-
-    # Themes are optional — you can remove if you want (kept concise)
-    if pos_themes:
-        lines.append("## Top Positive Themes")
-        for t in pos_themes[:5]:
-            lines.append(f"- {t}")
-        lines.append("")
-
-    if neg_themes:
-        lines.append("## Top Negative Themes")
-        for t in neg_themes[:5]:
-            lines.append(f"- {t}")
-        lines.append("")
-
-    # Quotes must be source-tied if you enforce that in tasks
-    # We support both formats:
-    # 1) quotes: [{polarity, quote, url}]
-    # 2) sample_quotes: {positive:[...], negative:[...]}
-    lines.append("## Sample Quotes")
-    if isinstance(quotes, list) and quotes:
-        for q in quotes[:6]:
-            polarity = (q.get("polarity") or "").strip().lower()
-            quote = (q.get("quote") or "").strip()
-            url = (q.get("url") or "").strip()
-            if quote:
-                tag = polarity.capitalize() if polarity else "Quote"
-                if url:
-                    lines.append(f"- **{tag}:** “{quote}”  \n  Source: {url}")
-                else:
-                    lines.append(f"- **{tag}:** “{quote}”")
-    else:
-        # fallback: dict style
-        if isinstance(quotes, dict):
-            posq = quotes.get("positive", []) or []
-            negq = quotes.get("negative", []) or []
-            if posq:
-                lines.append("\n**Positive:**")
-                for q in posq[:3]:
-                    lines.append(f"> {q}")
-            if negq:
-                lines.append("\n**Negative:**")
-                for q in negq[:3]:
-                    lines.append(f"> {q}")
-
-    path = os.path.join(outputs_dir, "review_sentiment.md")
-    _write_text(path, "\n".join(lines))
-    return path
-
-
 def feature_comparison_json_to_md(payload: dict) -> str:
+    """
+    Clean markdown table (the “before format” you want).
+    Uses actual competitor names as columns (no Competitor A/B).
+    """
     title = payload.get("title", "Feature Comparison Report")
     industry = payload.get("industry", "")
     summary = payload.get("summary", "")
@@ -144,27 +65,32 @@ def feature_comparison_json_to_md(payload: dict) -> str:
         md.append("_No comparison table generated._\n")
         return "\n".join(md)
 
+    # Keep column order stable
     cols = [k for k in table[0].keys() if k != "feature"]
+
     md.append("| Feature | " + " | ".join(cols) + " |")
     md.append("|---|" + "|".join(["---"] * len(cols)) + "|")
 
     for row in table:
         feat = str(row.get("feature", "")).strip()
-        values = [str(row.get(c, "")).strip() for c in cols]
+        values = []
+        for c in cols:
+            v = row.get(c, "")
+            if feat.lower() in {"price", "pricing"}:
+                v = _normalize_price(v)
+            values.append(str(v).strip())
         md.append("| " + feat + " | " + " | ".join(values) + " |")
 
     return "\n".join(md) + "\n"
 
 
-def patch_price_row_from_competitor_prices(
+def patch_price_row_from_pricing_json(
     fc_payload: dict,
     pricing_json: dict,
-    product_name: str,
-    competitors: List[str],
 ) -> dict:
     """
-    Overwrites Price row using competitor_prices.json.
-    Supports real column names AND generic Competitor A/B/C.
+    Ensure Price row comes from pricing_json (source of truth).
+    Works even if model wrote numeric values without $.
     """
     if not fc_payload or "comparison_table" not in fc_payload:
         return fc_payload
@@ -180,13 +106,9 @@ def patch_price_row_from_competitor_prices(
         if p is None or p == "":
             return ""
         try:
-            return f"{float(p):.2f}"
+            return f"${float(p):.2f}"
         except Exception:
-            return str(p).replace("$", "").strip()
-
-    generic_map: Dict[str, str] = {}
-    for i, comp in enumerate(competitors):
-        generic_map[f"competitor {chr(ord('a') + i)}"] = comp.lower()
+            return _normalize_price(p)
 
     for row in fc_payload["comparison_table"]:
         feat = str(row.get("feature", "")).strip().lower()
@@ -194,48 +116,73 @@ def patch_price_row_from_competitor_prices(
             for col in list(row.keys()):
                 if col == "feature":
                     continue
-                col_key = str(col).strip().lower()
-
-                if col_key in price_map:
-                    row[col] = fmt(price_map[col_key])
-                    continue
-
-                if col_key in generic_map:
-                    real_key = generic_map[col_key]
-                    if real_key in price_map:
-                        row[col] = fmt(price_map[real_key])
-
-            prod_key = product_name.strip().lower()
-            if prod_key in price_map:
-                for col in list(row.keys()):
-                    if col == "feature":
-                        continue
-                    if col.strip().lower() == prod_key:
-                        row[col] = fmt(price_map[prod_key])
-                        break
+                key = col.strip().lower()
+                if key in price_map:
+                    row[col] = fmt(price_map[key])
             break
 
     return fc_payload
 
 
-def _call_task_with_fallbacks(fn: Callable, *attempts):
+def _write_review_sentiment_md(outputs_dir: str, payload: dict, show_themes: bool = False) -> str:
     """
-    Tries multiple argument tuples until one matches the task signature.
-    This is what prevents your 'missing positional argument' crash.
+    TRUST FIX:
+    - Do NOT show generic “themes” by default.
+    - Only show quotes if they are source-backed (url present).
     """
-    last_err = None
-    for args in attempts:
-        try:
-            return fn(*args)
-        except TypeError as e:
-            last_err = e
-            continue
-    raise last_err
+    sentiment = payload.get("sentiment", {})
+    pos = int(sentiment.get("positive", 0) or 0)
+    neg = int(sentiment.get("negative", 0) or 0)
+    neu = int(sentiment.get("neutral", 0) or 0)
+
+    quotes = payload.get("quotes", []) or []
+    no_verified = bool(payload.get("no_verified_sources", False))
+
+    lines = []
+    lines.append("# Review Sentiment Summary\n")
+    lines.append(f"**Positive:** {pos}%  ")
+    lines.append(f"**Negative:** {neg}%  ")
+    lines.append(f"**Neutral:** {neu}%\n")
+
+    if no_verified:
+        lines.append("\n> ⚠️ Sentiment could not be source-verified for this product (no usable review sources were found).")
+        lines.append("> Quotes are intentionally omitted to avoid hallucinations.\n")
+
+    # Optional themes (OFF by default)
+    if show_themes:
+        pos_themes = payload.get("themes", {}).get("positive", []) or payload.get("top_positive_themes", []) or []
+        neg_themes = payload.get("themes", {}).get("negative", []) or payload.get("top_negative_themes", []) or []
+        if pos_themes:
+            lines.append("\n## Top Positive Themes")
+            for t in pos_themes[:5]:
+                lines.append(f"- {t}")
+        if neg_themes:
+            lines.append("\n## Top Negative Themes")
+            for t in neg_themes[:5]:
+                lines.append(f"- {t}")
+
+    # Quotes only if they have a URL (source-backed)
+    source_quotes = [q for q in quotes if isinstance(q, dict) and q.get("quote") and q.get("url")]
+
+    if source_quotes:
+        lines.append("\n## Source-backed Customer Quotes")
+        for q in source_quotes[:6]:
+            pol = (q.get("polarity") or "").strip().lower()
+            quote = str(q.get("quote")).strip()
+            url = str(q.get("url")).strip()
+            lines.append(f"\n**{pol.title()}:**")
+            lines.append(f"> {quote}")
+            lines.append(f"- Source: {url}")
+
+    path = os.path.join(outputs_dir, "review_sentiment.md")
+    with open(path, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines).strip() + "\n")
+    return path
 
 
-# ----------------------------
-# Main entry
-# ----------------------------
+# -------------------------
+# main entry
+# -------------------------
 def run_analysis(
     product_name: Optional[str] = None,
     industry: Optional[str] = None,
@@ -245,12 +192,25 @@ def run_analysis(
     features: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
 
-    product_name = product_name or "EcoWave Smart Bottle"
-    industry = industry or "Consumer Goods"
-    geography = geography or "US"
-    scale = scale or "SME"
+    product_name = (product_name or "EcoWave Smart Bottle").strip()
+    industry = (industry or "Consumer Goods").strip()
+    geography = (geography or "US").strip()
+    scale = (scale or "SME").strip()
     competitors = competitors or []
     features = features or []
+
+    # hard safety: de-dupe / clean
+    def _dedupe(xs: List[str]) -> List[str]:
+        out, seen = [], set()
+        for x in xs:
+            k = x.strip()
+            if k and k.lower() not in seen:
+                out.append(k)
+                seen.add(k.lower())
+        return out
+
+    competitors = _dedupe(competitors)
+    features = _dedupe(features)
 
     logger.info("🚀 Running MarketMind analysis for %s (%s)", product_name, industry)
 
@@ -264,44 +224,31 @@ def run_analysis(
         sentiment_agent = agents.review_analyst()
         synthesizer = agents.lead_strategy_synthesizer()
 
-        # --- Core tasks ---
         planning_task = tasks.research_planning_task(consultant, product_name, industry)
-
-        # persona task signature differs in your versions; keep it safe:
-        persona_task = _call_task_with_fallbacks(
-            tasks.customer_persona_task,
-            (persona_agent, product_name, industry, geography, scale),  # newer
-            (persona_agent, product_name, industry),                    # older
-        )
+        persona_task = tasks.customer_persona_task(persona_agent, product_name, industry, geography, scale)
 
         pricing_task = tasks.competitor_pricing_json_task(
             competitor_agent, product_name, industry, competitors
         )
 
+        # IMPORTANT: feature comparison must use the user-entered features
+        # We pass pricing_json AFTER we have it (post kickoff) — so here we generate
+        # feature comparison via a dedicated task later, not via a generic tool.
         feature_scores_task = tasks.feature_scores_json_task(
             competitor_agent, product_name, industry, competitors, features
         )
 
-        # ✅ FIX: market_growth_json_task has changed across your versions.
-        # We try common signatures:
-        growth_task = _call_task_with_fallbacks(
-            tasks.market_growth_json_task,
-            (competitor_agent, product_name, industry, competitors, geography),             # (agent, product, industry, competitors, geography)
-            (competitor_agent, product_name, industry, geography, scale, competitors),     # (agent, product, industry, geography, scale, competitors)
-            (competitor_agent, product_name, industry, geography, competitors),            # (agent, product, industry, geography, competitors)
+        # PRODUCT demand trend (not generic industry line)
+        # Your tasks.py should define product_growth_json_task (recommended),
+        # but if you kept market_growth_json_task, it should be product-framed in prompt.
+        growth_task = tasks.market_growth_json_task(
+            competitor_agent, product_name, industry, competitors, geography
         )
 
-        review_task = tasks.review_analysis_task(sentiment_agent, product_name)
-
-        # Feature comparison tool (optional)
-        raw_feature_output = None
-        if FeatureComparisonTool is not None:
-            feature_tool = FeatureComparisonTool()
-            raw_feature_output = (
-                feature_tool.run(product_name, industry)
-                if hasattr(feature_tool, "run")
-                else feature_tool._run(product_name, industry)
-            )
+        # Verified sentiment JSON (source-backed quotes)
+        review_task = tasks.sentiment_verified_json_task(
+            sentiment_agent, product_name, industry, sources=[]
+        )
 
         synthesis_task = tasks.synthesis_task(
             synthesizer,
@@ -326,93 +273,106 @@ def run_analysis(
 
         crew.kickoff()
 
-        # ----------------------------
-        # Write outputs
-        # ----------------------------
-        os.makedirs(OUTPUT_DIR, exist_ok=True)
+        outputs_dir = "outputs"
+        os.makedirs(outputs_dir, exist_ok=True)
         files_written: List[str] = []
 
-        # ---- Pricing JSON ----
+        # ---- Pricing JSON (source of truth) ----
         pricing_json = _safe_json_loads(str(getattr(pricing_task, "output", ""))) or {
             "product": product_name,
             "currency": "USD",
             "prices": [{"name": product_name, "price": 0}],
-            "notes": "Fallback pricing JSON (task output missing/invalid).",
+            "notes": "fallback",
         }
-        prices_path = os.path.join(OUTPUT_DIR, "competitor_prices.json")
+        prices_path = os.path.join(outputs_dir, "competitor_prices.json")
         _write_json(prices_path, pricing_json)
         files_written.append(prices_path)
 
-        # ---- Feature comparison markdown (patch price row if possible) ----
-        feature_md = ""
-        fc_payload = _safe_json_loads(str(raw_feature_output)) if raw_feature_output else None
-        if fc_payload and isinstance(fc_payload, dict):
-            fc_payload = patch_price_row_from_competitor_prices(
-                fc_payload, pricing_json, product_name=product_name, competitors=competitors
-            )
-            feature_md = feature_comparison_json_to_md(fc_payload)
-        else:
-            # If tool isn't available or isn't JSON, still write something
-            feature_md = str(raw_feature_output or "Feature comparison tool not available or returned no data.")
+        # ---- Feature Comparison JSON task (NOW with pricing_json available) ----
+        # This fixes: “Competitor A/B” + wrong features.
+        fc_task = tasks.feature_comparison_json_task(
+            competitor_agent,
+            product_name,
+            industry,
+            competitors,
+            features,
+            pricing_json,
+        )
 
-        feature_md_path = os.path.join(OUTPUT_DIR, "feature_comparison.md")
-        _write_text(feature_md_path, feature_md)
+        # Run fc_task using a mini crew (simple + reliable)
+        fc_crew = Crew(agents=[competitor_agent], tasks=[fc_task], verbose=True)
+        fc_crew.kickoff()
+
+        fc_payload = _safe_json_loads(str(getattr(fc_task, "output", ""))) or {
+            "title": f"Feature Comparison Report for {product_name}",
+            "industry": industry,
+            "summary": "Fallback feature comparison.",
+            "comparison_table": [],
+        }
+
+        # Force price row to match pricing_json
+        fc_payload = patch_price_row_from_pricing_json(fc_payload, pricing_json)
+
+        feature_md = feature_comparison_json_to_md(fc_payload)
+        feature_md_path = os.path.join(outputs_dir, "feature_comparison.md")
+        with open(feature_md_path, "w", encoding="utf-8") as f:
+            f.write(feature_md)
         files_written.append(feature_md_path)
 
-        # ---- Feature scores JSON ----
+        # ---- Feature scores JSON (for radar) ----
         scores_json = _safe_json_loads(str(getattr(feature_scores_task, "output", ""))) or {
             "product": product_name,
             "competitors": competitors,
             "features": features,
             "scores": [],
         }
-        scores_path = os.path.join(OUTPUT_DIR, "feature_scores.json")
+        scores_path = os.path.join(outputs_dir, "feature_scores.json")
         _write_json(scores_path, scores_json)
         files_written.append(scores_path)
 
-        # ---- Market growth JSON ----
+        # ---- Product demand / growth JSON ----
         growth_json = _safe_json_loads(str(getattr(growth_task, "output", ""))) or {
-            "industry": industry,
+            "product": product_name,
             "geography": geography,
             "years": ["2023", "2024", "2025", "2026"],
-            "growth_percent": [12, 18, 24, 33],
-            "rationale": "Fallback growth curve (task output missing/invalid).",
+            "growth_percent": [0, 0, 0, 0],
+            "rationale": "Fallback demand trend.",
         }
-        growth_path = os.path.join(OUTPUT_DIR, "market_growth.json")
+        growth_path = os.path.join(outputs_dir, "market_growth.json")
         _write_json(growth_path, growth_json)
         files_written.append(growth_path)
 
-        # ---- Sentiment JSON + review_sentiment.md (single source of truth) ----
+        # ---- Sentiment (single source of truth) ----
         sentiment_payload = _safe_json_loads(str(getattr(review_task, "output", ""))) or {
             "product": product_name,
-            "sentiment": {"positive": 60, "negative": 30, "neutral": 10},
+            "no_verified_sources": True,
+            "sentiment": {"positive": 0, "negative": 0, "neutral": 0},
             "themes": {"positive": [], "negative": [], "neutral": []},
             "quotes": [],
-            "no_verified_sources": True,
         }
 
-        sentiment_metrics = sentiment_payload.get("sentiment", {"positive": 60, "negative": 30, "neutral": 10})
-        sentiment_json_path = os.path.join(OUTPUT_DIR, "sentiment_metrics.json")
+        sentiment_metrics = sentiment_payload.get("sentiment", {"positive": 0, "negative": 0, "neutral": 0})
+        sentiment_json_path = os.path.join(outputs_dir, "sentiment_metrics.json")
         _write_json(sentiment_json_path, sentiment_metrics)
         files_written.append(sentiment_json_path)
 
-        review_md_path = _write_review_sentiment_md(OUTPUT_DIR, sentiment_payload)
+        # write review_sentiment.md WITHOUT themes (show_themes=False)
+        review_md_path = _write_review_sentiment_md(outputs_dir, sentiment_payload, show_themes=False)
         files_written.append(review_md_path)
 
-        # ---- Markdown reports (ALL) ----
+        # ---- Markdown reports (ensure all exist like “before”) ----
         md_map = {
             "research_plan.md": getattr(planning_task, "output", ""),
             "customer_analysis.md": getattr(persona_task, "output", ""),
             "final_market_strategy_report.md": getattr(synthesis_task, "output", ""),
         }
         for name, content in md_map.items():
-            if content:
-                path = os.path.join(OUTPUT_DIR, name)
-                _write_text(path, str(content))
-                files_written.append(path)
+            path = os.path.join(outputs_dir, name)
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(str(content or "").strip() + "\n")
+            files_written.append(path)
 
-        logger.info("✅ Analysis complete. Files written: %s", len(files_written))
-        return {"success": True, "outputs_dir": OUTPUT_DIR, "files_written": files_written}
+        return {"success": True, "outputs_dir": outputs_dir, "files_written": files_written}
 
     except Exception as e:
         logger.error("❌ Analysis failed: %s", e)
