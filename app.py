@@ -192,13 +192,14 @@ st.markdown("---")
 st.subheader("⚙️ Feature Comparison Radar")
 
 rows = (scores_json or {}).get("scores", []) if scores_json else []
+expected_products = [product_name] + competitors_list
+
 if not rows:
     st.info("No AI feature scores found. Try running analysis again (ensure OPENAI_API_KEY is set).")
 else:
     df_scores = pd.DataFrame(rows)
-
-    # normalize columns
     df_scores.columns = [c.strip().lower() for c in df_scores.columns]
+
     required = {"product", "feature", "score"}
     if not required.issubset(set(df_scores.columns)):
         st.error(f"feature_scores.json missing required fields. Found: {list(df_scores.columns)}")
@@ -206,8 +207,19 @@ else:
         df_scores["score"] = pd.to_numeric(df_scores["score"], errors="coerce")
         df_scores = df_scores.dropna(subset=["score"])
 
-        selected_products = [product_name] + competitors_list
-        df_scores = df_scores[df_scores["product"].isin(selected_products)]
+        # Debug visibility
+        found_products = sorted(df_scores["product"].unique().tolist())
+        missing_products = [p for p in expected_products if p not in found_products]
+        if missing_products:
+            st.warning(
+                "Radar missing some competitors in feature_scores.json.\n\n"
+                f"Expected: {expected_products}\n"
+                f"Found: {found_products}\n"
+                f"Missing: {missing_products}"
+            )
+
+        # Filter to selected products/features
+        df_scores = df_scores[df_scores["product"].isin(expected_products)]
         df_scores = df_scores[df_scores["feature"].isin(features_list)]
 
         if df_scores.empty:
@@ -223,9 +235,6 @@ else:
             )
             fig3.update_traces(fill="toself", opacity=0.55)
             st.plotly_chart(fig3, use_container_width=True)
-
-st.markdown("---")
-
 # ----------------------------
 # Market Growth
 # ----------------------------
