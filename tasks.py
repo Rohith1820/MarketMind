@@ -93,25 +93,35 @@ class MarketResearchTasks:
             agent=agent,
         )
 
-    def market_growth_json_task(self, agent, product_name: str, industry: str, geography: str, scale: str, competitors: List[str]):
-        comps = competitors or []
+    def market_growth_json_task(
+        self,
+        agent,
+        product_name: str,
+        industry: str,
+        geography: str,
+        competitors: List[str],
+    ):
+        comps = ", ".join(competitors) if competitors else "None"
+
         return Task(
             description=(
-                f"Estimate market growth trend for '{industry}'.\n"
+                f"Estimate market growth trend for the industry.\n\n"
+                f"Product: {product_name}\n"
+                f"Industry: {industry}\n"
                 f"Geography: {geography}\n"
-                f"Scale: {scale}\n"
                 f"Competitor context: {comps}\n\n"
                 "Return STRICT JSON ONLY:\n"
                 "{\n"
-                f'  \"industry\": \"{industry}\",\n'
-                f'  \"geography\": \"{geography}\",\n'
-                '  \"years\": [\"2023\",\"2024\",\"2025\",\"2026\"],\n'
-                '  \"growth_percent\": [0,0,0,0],\n'
-                '  \"rationale\": \"1-2 cautious lines\"\n'
+                f'  "industry": "{industry}",\n'
+                f'  "geography": "{geography}",\n'
+                '  "years": ["2023","2024","2025","2026"],\n'
+                '  "growth_percent": [0,0,0,0],\n'
+                '  "rationale": "1–2 cautious lines based on category trends"\n'
                 "}\n\n"
                 "Rules:\n"
-                "- growth_percent values must be numbers.\n"
-                "- Do not invent citations.\n"
+                "- growth_percent must be numeric.\n"
+                "- Do NOT invent citations.\n"
+                "- Keep assumptions conservative.\n"
             ),
             expected_output="Strict JSON only.",
             agent=agent,
