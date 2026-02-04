@@ -1,6 +1,6 @@
 from crewai import Agent
 from tools.scrape_pipeline import WebSearchTool, WebScrapeTool, FallbackSearchTool, FileReadTool
-from tools.review_scraper import ReviewScraperTool
+
 
 
 class MarketResearchAgents:
