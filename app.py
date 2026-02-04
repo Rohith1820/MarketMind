@@ -110,20 +110,20 @@ st.markdown("---")
 prices_json = safe_load_json(os.path.join(OUTPUT_DIR, "competitor_prices.json"))
 scores_json = safe_load_json(os.path.join(OUTPUT_DIR, "feature_scores.json"))
 growth_json = safe_load_json(os.path.join(OUTPUT_DIR, "market_growth.json"))
-sentiment_payload = safe_load_json(os.path.join(OUTPUT_DIR, "sentiment_metrics.json"))
+sentiment_verified = safe_load_json(os.path.join(OUTPUT_DIR, "sentiment_verified.json"))
 
 # ==========================================
 # 💬 Sentiment (TRUST FIRST)
 # ==========================================
 st.subheader("💬 Customer Sentiment Overview")
 
-if not sentiment_payload:
-    st.info("Run analysis to generate sentiment metrics.")
+if not sentiment_verified:
+    st.info("Run analysis to generate verified sentiment.")
 else:
-    sentiment = sentiment_payload.get("sentiment", {}) or {}
-    pos = int(sentiment.get("positive", 60) or 60)
-    neg = int(sentiment.get("negative", 30) or 30)
-    neu = int(sentiment.get("neutral", 10) or 10)
+    s = sentiment_verified.get("sentiment", {})
+    pos = s.get("positive", 60)
+    neg = s.get("negative", 30)
+    neu = s.get("neutral", 10)
 
     df_sentiment = pd.DataFrame({
         "Sentiment": ["Positive", "Negative", "Neutral"],
@@ -140,26 +140,16 @@ else:
     fig1.update_traces(textinfo="percent+label")
     st.plotly_chart(fig1, use_container_width=True)
 
-    no_verified = bool(sentiment_payload.get("no_verified_sources", True))
-    if no_verified:
-        st.warning(
-            "Sentiment is estimated. No verified review sources were available, "
-            "so MarketMind hides themes and quotes to avoid hallucinations."
-        )
+    # show trust status + sources
+    if sentiment_verified.get("no_verified_sources") is True:
+        st.warning("Sentiment could not be verified with reliable sources for this product.")
     else:
-        quotes = sentiment_payload.get("quotes", []) or []
+        quotes = sentiment_verified.get("quotes", [])
         if quotes:
-            with st.expander("✅ Verified Quotes (with sources)", expanded=False):
-                for q in quotes[:10]:
-                    pol = str(q.get("polarity", "")).strip().title()
-                    qt = str(q.get("quote", "")).strip()
-                    url = str(q.get("url", "")).strip()
-                    if qt:
-                        st.markdown(f"**{pol}:** “{qt}”")
-                        if url:
-                            st.markdown(f"- Source: {url}")
-
-st.markdown("---")
+            with st.expander("Verified quotes (with sources)", expanded=False):
+                for q in quotes[:6]:
+                    st.write(f"**{q['polarity'].title()}**: {q['quote']}")
+                    st.write(f"- {q['url']}")
 
 # ==========================================
 # 💰 Competitor Pricing (AI)
