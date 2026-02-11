@@ -290,23 +290,27 @@ with tab_pricing:
         if df_price.empty:
             st.warning("No verified prices found to plot for your selected competitors/product.")
         else:
-            fig_price = px.bar(
-                df_price,
-                x="Competitor",
-                y="Price",
-                title=f"Verified Pricing (USD) — {product_name} vs competitors",
-            )
+            # Build a consistent competitor color map based on palette
+            items = [product_name] + competitors_list
+pal = cycle(MM_PALETTE)
+COMP_COLOR_MAP = {name: next(pal) for name in items}
 
-            # ✅ Change bar color (single consistent color)
-            fig_price.update_traces(marker_color="#34D399")  # mint-green
+fig_price = px.bar(
+    df_price,
+    x="Competitor",
+    y="Price",
+    color="Competitor",  # ✅ makes bars multi-color
+    color_discrete_map=COMP_COLOR_MAP,  # ✅ uses same palette system
+    title=f"Verified Pricing (USD) — {product_name} vs competitors",
+)
 
-            fig_price.update_traces(texttemplate=None)
-            fig_price.update_layout(yaxis_title="Price (USD)")
-            st.plotly_chart(fig_price, use_container_width=True)
-
-            with st.expander("🔎 Raw pricing JSON", expanded=False):
-                st.json(prices_json)
-
+fig_price.update_traces(texttemplate=None)
+fig_price.update_layout(
+    yaxis_title="Price (USD)",
+    xaxis_title="",
+    legend_title_text="",
+)
+st.plotly_chart(fig_price, use_container_width=True)
 # ============================
 # Features
 # ============================
