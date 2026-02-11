@@ -2,8 +2,6 @@
 import os
 import json
 from datetime import datetime
-from urllib.parse import urlparse
-from itertools import cycle
 
 import pandas as pd
 import plotly.express as px
@@ -38,12 +36,14 @@ def safe_read_text(path: str):
 
 
 def parse_csv_list(text: str):
+    # accepts comma or newline separated
     items = []
     for part in (text or "").replace("\n", ",").split(","):
         p = part.strip()
         if p:
             items.append(p)
 
+    # de-duplicate preserving order (case-insensitive)
     seen = set()
     out = []
     for x in items:
@@ -73,61 +73,6 @@ def clamp_int(x, lo=0, hi=100, default=0):
         return default
 
 
-def normalize_sentiment(verified: dict):
-    """
-    Single source of truth for:
-    - pie chart
-    - metrics
-    - quote rendering
-    """
-    if not isinstance(verified, dict):
-        verified = {}
-
-    sent = verified.get("sentiment", {}) if isinstance(verified.get("sentiment", {}), dict) else {}
-    pos = clamp_int(sent.get("positive", 0))
-    neg = clamp_int(sent.get("negative", 0))
-    neu = clamp_int(sent.get("neutral", 0))
-
-    total = pos + neg + neu
-    if total <= 0:
-        # safe default (still shows chart)
-        pos, neg, neu = 60, 30, 10
-        total = 100
-
-    pos = int(round(pos * 100 / total))
-    neg = int(round(neg * 100 / total))
-    neu = 100 - pos - neg
-
-    no_verified = bool(verified.get("no_verified_sources", False))
-
-    quotes = verified.get("quotes", [])
-    cleaned_quotes = []
-    if isinstance(quotes, list) and not no_verified:
-        for q in quotes:
-            if not isinstance(q, dict):
-                continue
-            qt = str(q.get("quote", "")).strip()
-            url = str(q.get("url", "")).strip()
-            pol = str(q.get("polarity", "")).strip().lower()
-            if qt and url and pol in {"positive", "negative", "neutral"}:
-                cleaned_quotes.append({"polarity": pol, "quote": qt, "url": url})
-
-    return {
-        "no_verified_sources": no_verified,
-        "sentiment": {"positive": pos, "negative": neg, "neutral": neu},
-        "quotes": cleaned_quotes,
-    }
-
-
-def linkify_source(url: str) -> str:
-    try:
-        host = urlparse(url).netloc or url
-        host = host.replace("www.", "")
-        return f"[{host}]({url})"
-    except Exception:
-        return f"[source]({url})"
-
-
 # ----------------------------
 # Page + Styles
 # ----------------------------
@@ -155,13 +100,13 @@ CUSTOM_CSS = """
   background: rgba(255,255,255,0.03);
 }
 
-/* Sidebar section header */
+/* Sidebar header */
 .mm-side-h { font-weight: 700; margin-top: .5rem; }
 
 /* Buttons */
 div.stButton > button { border-radius: 12px; padding: 0.6rem 1rem; }
 
-/* Expanders */
+/* Expander */
 div[data-testid="stExpander"] details { border-radius: 14px; }
 </style>
 """
@@ -169,22 +114,19 @@ st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
 
 ensure_outputs_dir()
 
-# Palette (used across charts so pricing bars match sentiment pie)
+# A single shared palette for charts (pie + bars + lines)
 MM_PALETTE = [
-    "#3B82F6",  # blue
-    "#EC4899",  # pink
-    "#22C55E",  # green
-    "#F59E0B",  # amber
-    "#A855F7",  # purple
-    "#06B6D4",  # cyan
-    "#EF4444",  # red
+    "#60A5FA",  # blue
+    "#F472B6",  # pink
+    "#34D399",  # green
+    "#FBBF24",  # amber
+    "#A78BFA",  # purple
+    "#FB7185",  # rose
+    "#22C55E",  # emerald
+    "#38BDF8",  # sky
+    "#F59E0B",  # orange
 ]
 
-SENTIMENT_COLOR_MAP = {
-    "Positive": MM_PALETTE[2],  # green
-    "Negative": MM_PALETTE[6],  # red
-    "Neutral": MM_PALETTE[3],   # amber
-}
 
 # ----------------------------
 # Hero
@@ -198,6 +140,7 @@ st.markdown(
 """,
     unsafe_allow_html=True,
 )
+
 st.write("")
 
 # ----------------------------
@@ -267,11 +210,24 @@ prices_json = safe_load_json(os.path.join(OUTPUT_DIR, "competitor_prices.json"))
 scores_json = safe_load_json(os.path.join(OUTPUT_DIR, "feature_scores.json"))
 growth_json = safe_load_json(os.path.join(OUTPUT_DIR, "market_growth.json"))
 
-# IMPORTANT: use sentiment_verified.json (single source of truth)
+# Prefer the single source of truth if present
 sentiment_verified = safe_load_json(os.path.join(OUTPUT_DIR, "sentiment_verified.json"))
-sent_norm = normalize_sentiment(sentiment_verified or {})
+sentiment_metrics = safe_load_json(os.path.join(OUTPUT_DIR, "sentiment_metrics.json"))
 review_sent_md = safe_read_text(os.path.join(OUTPUT_DIR, "review_sentiment.md"))
-feat_md = safe_read_text(os.path.join(OUTPUT_DIR, "feature_comparison.md"))
+
+# Resolve sentiment numbers:
+# - before analysis: show 0/0/0 (per your request)
+# - after analysis: prefer sentiment_verified, else sentiment_metrics
+pos = neg = neu = 0
+if isinstance(sentiment_verified, dict):
+    s = sentiment_verified.get("sentiment", {}) or {}
+    pos = clamp_int(s.get("positive", 0), default=0)
+    neg = clamp_int(s.get("negative", 0), default=0)
+    neu = clamp_int(s.get("neutral", 0), default=0)
+elif isinstance(sentiment_metrics, dict):
+    pos = clamp_int(sentiment_metrics.get("positive", 0), default=0)
+    neg = clamp_int(sentiment_metrics.get("negative", 0), default=0)
+    neu = clamp_int(sentiment_metrics.get("neutral", 0), default=0)
 
 # ----------------------------
 # Tabs
@@ -298,10 +254,6 @@ with tab_overview:
             st.caption(f"Last run (UTC): {st.session_state['last_run']}")
         st.markdown("</div>", unsafe_allow_html=True)
 
-    pos = sent_norm["sentiment"]["positive"]
-    neg = sent_norm["sentiment"]["negative"]
-    neu = sent_norm["sentiment"]["neutral"]
-
     with c2:
         st.markdown("<div class='mm-card'>", unsafe_allow_html=True)
         st.metric("Positive", f"{pos}%")
@@ -318,30 +270,26 @@ with tab_overview:
     st.write("")
     st.subheader("💬 Sentiment (source-aware)")
 
-    df_sentiment = pd.DataFrame(
-        {"Sentiment": ["Positive", "Negative", "Neutral"], "Percentage": [pos, neg, neu]}
-    )
-    fig_sent = px.pie(
-        df_sentiment,
-        names="Sentiment",
-        values="Percentage",
-        hole=0.35,
-        title=f"Sentiment Breakdown for {product_name}",
-        color="Sentiment",
-        color_discrete_map=SENTIMENT_COLOR_MAP,
-    )
-    fig_sent.update_traces(textinfo="percent+label")
-    st.plotly_chart(fig_sent, use_container_width=True)
-
-    if sent_norm["no_verified_sources"]:
-        st.info(
-            "No verified review sources were found for sentiment on this run, so quotes are hidden to prevent hallucinations."
+    if not (sentiment_verified or sentiment_metrics):
+        st.info("Run the analysis to generate sentiment analysis.")
+    else:
+        df_sentiment = pd.DataFrame(
+            {"Sentiment": ["Positive", "Negative", "Neutral"], "Percentage": [pos, neg, neu]}
         )
+        fig_sent = px.pie(
+            df_sentiment,
+            names="Sentiment",
+            values="Percentage",
+            hole=0.35,
+            title=f"Sentiment Breakdown for {product_name}",
+            color="Sentiment",
+            color_discrete_sequence=MM_PALETTE[:3],  # keep consistent
+        )
+        fig_sent.update_traces(textinfo="percent+label")
+        st.plotly_chart(fig_sent, use_container_width=True)
 
-  
-    if review_sent_md:
-        with st.expander("📄 View the exact sentiment summary used in reports", expanded=False):
-            st.markdown(review_sent_md)
+        # IMPORTANT: per your request, do NOT show quotes/sources under the pie chart.
+        st.caption("Quotes + sources are available in the **review_sentiment.md** report (Reports tab).")
 
 # ============================
 # Pricing
@@ -375,17 +323,20 @@ with tab_pricing:
         if df_price.empty:
             st.warning("No verified prices found to plot for your selected competitors/product.")
         else:
-            # Multi-color bars aligned to the app palette
+            # Multi-color bars that match the palette (same family as pie)
             fig_price = px.bar(
                 df_price,
                 x="Competitor",
                 y="Price",
                 color="Competitor",
-                color_discrete_sequence=MM_PALETTE,
                 title=f"Verified Pricing (USD) — {product_name} vs competitors",
+                color_discrete_sequence=MM_PALETTE,
             )
             fig_price.update_traces(texttemplate=None)
-            fig_price.update_layout(yaxis_title="Price (USD)", showlegend=False)
+            fig_price.update_layout(
+                yaxis_title="Price (USD)",
+                legend_title_text="",
+            )
             st.plotly_chart(fig_price, use_container_width=True)
 
             with st.expander("🔎 Raw pricing JSON", expanded=False):
@@ -419,10 +370,7 @@ with tab_features:
             present = sorted(df_scores["product"].unique().tolist())
             missing = [p for p in selected_products if p not in present]
             if missing:
-                st.warning(
-                    f"Missing score rows for: {', '.join(missing)}. "
-                    "Your feature_scores task must output scores for EVERY feature across ALL products."
-                )
+                st.warning(f"Missing score rows for: {', '.join(missing)} (your prompt should force full coverage).")
 
             if df_scores.empty:
                 st.info("No scores matched your selected competitors/features. Run analysis again.")
@@ -441,6 +389,7 @@ with tab_features:
 
     st.markdown("---")
     st.subheader("📄 Feature Comparison Report (table)")
+    feat_md = safe_read_text(os.path.join(OUTPUT_DIR, "feature_comparison.md"))
     if not feat_md:
         st.info("feature_comparison.md not found yet. Run analysis.")
     else:
@@ -451,7 +400,7 @@ with tab_features:
 # ============================
 with tab_growth:
     st.subheader("📈 Product Demand / Growth Trend")
-    st.caption("Product-level demand trend (not generic industry growth).")
+    st.caption("This should be product-specific (not generic industry growth).")
 
     if not growth_json:
         st.info("Run analysis to generate product trend.")
@@ -513,3 +462,4 @@ with tab_reports:
 
         st.markdown("---")
         st.caption("Tip: If a report is missing, ensure main.py writes it even if empty (write the file anyway).")
+
