@@ -338,22 +338,7 @@ with tab_overview:
             "No verified review sources were found for sentiment on this run, so quotes are hidden to prevent hallucinations."
         )
 
-    st.write("")
-    st.subheader("🔗 Source-backed Customer Quotes")
-    quotes = sent_norm.get("quotes", []) or []
-    if not quotes:
-        st.caption("No source-backed quotes available (this happens when sources are missing or blocked).")
-    else:
-        # group by polarity
-        for pol in ["positive", "negative", "neutral"]:
-            group = [q for q in quotes if q.get("polarity") == pol]
-            if not group:
-                continue
-            st.markdown(f"**{pol.title()}:**")
-            for q in group[:6]:
-                st.markdown(f"> {q['quote']}")
-                st.markdown(f"- Source: {linkify_source(q['url'])}")
-
+  
     if review_sent_md:
         with st.expander("📄 View the exact sentiment summary used in reports", expanded=False):
             st.markdown(review_sent_md)
