@@ -2,6 +2,7 @@
 import os
 import json
 from datetime import datetime
+
 import pandas as pd
 import plotly.express as px
 import streamlit as st
@@ -41,6 +42,7 @@ def parse_csv_list(text: str):
         if p:
             items.append(p)
 
+    # de-duplicate preserving order (case-insensitive)
     seen = set()
     out = []
     for x in items:
@@ -62,31 +64,6 @@ def fmt_price(x):
         return None
 
 
-def get_sentiment_from_outputs():
-    """
-    SINGLE SOURCE OF TRUTH:
-    - Prefer sentiment_verified.json
-    - Fallback to sentiment_metrics.json
-    """
-    verified = safe_load_json(os.path.join(OUTPUT_DIR, "sentiment_verified.json"))
-    if isinstance(verified, dict) and "sentiment" in verified:
-        s = verified.get("sentiment") or {}
-        return {
-            "positive": int(s.get("positive", 0) or 0),
-            "negative": int(s.get("negative", 0) or 0),
-            "neutral": int(s.get("neutral", 0) or 0),
-            "verified_payload": verified,
-        }
-
-    metrics = safe_load_json(os.path.join(OUTPUT_DIR, "sentiment_metrics.json")) or {}
-    return {
-        "positive": int(metrics.get("positive", 0) or 0),
-        "negative": int(metrics.get("negative", 0) or 0),
-        "neutral": int(metrics.get("neutral", 0) or 0),
-        "verified_payload": None,
-    }
-
-
 # ----------------------------
 # Page + Styles
 # ----------------------------
@@ -95,6 +72,7 @@ st.set_page_config(page_title="MarketMind", page_icon="🧠", layout="wide")
 CUSTOM_CSS = """
 <style>
 .block-container { padding-top: 1.25rem; }
+
 .mm-hero {
   padding: 18px 18px;
   border-radius: 16px;
@@ -103,18 +81,44 @@ CUSTOM_CSS = """
 }
 .mm-hero h1 { margin: 0; font-size: 2rem; }
 .mm-hero p { margin: .4rem 0 0; opacity: .9; }
+
 .mm-card {
   padding: 16px;
   border-radius: 16px;
   border: 1px solid rgba(255,255,255,0.10);
   background: rgba(255,255,255,0.03);
 }
+
+.mm-muted { opacity: .75; font-size: 0.9rem; }
+
 .mm-side-h { font-weight: 700; margin-top: .5rem; }
+
 div.stButton > button { border-radius: 12px; padding: 0.6rem 1rem; }
 div[data-testid="stExpander"] details { border-radius: 14px; }
 </style>
 """
 st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
+
+# ----------------------------
+# Shared palette (used across charts)
+# ----------------------------
+MM_PALETTE = [
+    "#3B82F6",  # blue
+    "#EC4899",  # pink
+    "#22C55E",  # green
+    "#F59E0B",  # amber
+    "#A855F7",  # purple
+    "#06B6D4",  # cyan
+    "#F97316",  # orange
+    "#94A3B8",  # slate
+]
+
+SENTIMENT_COLOR_MAP = {
+    "Positive": MM_PALETTE[2],  # green
+    "Negative": MM_PALETTE[3],  # amber
+    "Neutral": MM_PALETTE[0],   # blue
+}
+
 ensure_outputs_dir()
 
 # ----------------------------
@@ -129,6 +133,7 @@ st.markdown(
 """,
     unsafe_allow_html=True,
 )
+
 st.write("")
 
 # ----------------------------
@@ -192,16 +197,20 @@ if run_btn:
 st.write("")
 
 # ----------------------------
-# Load Outputs
+# Load Outputs (single source of truth for sentiment!)
 # ----------------------------
 prices_json = safe_load_json(os.path.join(OUTPUT_DIR, "competitor_prices.json"))
 scores_json = safe_load_json(os.path.join(OUTPUT_DIR, "feature_scores.json"))
 growth_json = safe_load_json(os.path.join(OUTPUT_DIR, "market_growth.json"))
+
+# ✅ single truth
+sentiment_verified = safe_load_json(os.path.join(OUTPUT_DIR, "sentiment_verified.json"))
 review_sent_md = safe_read_text(os.path.join(OUTPUT_DIR, "review_sentiment.md"))
 
-sent = get_sentiment_from_outputs()
-pos, neg, neu = sent["positive"], sent["negative"], sent["neutral"]
-sentiment_verified_payload = sent["verified_payload"]
+sent = (sentiment_verified or {}).get("sentiment", {})
+pos = int(sent.get("positive", 0) or 0)
+neg = int(sent.get("negative", 0) or 0)
+neu = int(sent.get("neutral", 0) or 0)
 
 # ----------------------------
 # Tabs
@@ -244,8 +253,8 @@ with tab_overview:
     st.write("")
     st.subheader("💬 Sentiment (source-aware)")
 
-    if (pos + neg + neu) <= 0:
-        st.info("Run analysis to generate sentiment.")
+    if not sentiment_verified:
+        st.info("Run analysis to generate source-aware sentiment.")
     else:
         df_sentiment = pd.DataFrame(
             {"Sentiment": ["Positive", "Negative", "Neutral"], "Percentage": [pos, neg, neu]}
@@ -256,17 +265,17 @@ with tab_overview:
             values="Percentage",
             hole=0.35,
             title=f"Sentiment Breakdown for {product_name}",
+            color="Sentiment",
+            color_discrete_map=SENTIMENT_COLOR_MAP,
         )
         fig_sent.update_traces(textinfo="percent+label")
         st.plotly_chart(fig_sent, use_container_width=True)
 
-        # Show the markdown sentiment report (same truth)
         if review_sent_md:
-            with st.expander("📄 View sentiment summary used in reports", expanded=False):
+            with st.expander("📄 View the exact sentiment summary used in reports", expanded=False):
                 st.markdown(review_sent_md)
-
-        if sentiment_verified_payload and sentiment_verified_payload.get("no_verified_sources", False):
-            st.warning("Sentiment is NOT source-verified yet (no usable sources found).")
+        else:
+            st.caption("No review_sentiment.md found yet.")
 
 # ============================
 # Pricing
@@ -279,10 +288,17 @@ with tab_pricing:
         st.info("Run analysis to generate competitor pricing.")
     else:
         df_price = pd.DataFrame(prices_json.get("prices", []))
+
         if not df_price.empty:
-            df_price = df_price.rename(columns={"name": "Competitor", "price": "Price"})
+            if "name" in df_price.columns:
+                df_price = df_price.rename(columns={"name": "Competitor"})
+            if "price" in df_price.columns:
+                df_price = df_price.rename(columns={"price": "Price"})
+
             df_price["Price"] = df_price["Price"].apply(fmt_price)
             df_price = df_price.dropna(subset=["Competitor"])
+
+            # keep only user-entered + product itself
             allowed = set([product_name] + competitors_list)
             df_price = df_price[df_price["Competitor"].isin(allowed)]
             df_price = df_price.dropna(subset=["Price"])
@@ -290,27 +306,26 @@ with tab_pricing:
         if df_price.empty:
             st.warning("No verified prices found to plot for your selected competitors/product.")
         else:
-            # Build a consistent competitor color map based on palette
-            items = [product_name] + competitors_list
-pal = cycle(MM_PALETTE)
-COMP_COLOR_MAP = {name: next(pal) for name in items}
+            # ✅ multi-color bars + same palette family as sentiment
+            fig_price = px.bar(
+                df_price,
+                x="Competitor",
+                y="Price",
+                color="Competitor",
+                color_discrete_sequence=MM_PALETTE,
+                title=f"Verified Pricing (USD) — {product_name} vs competitors",
+            )
+            # remove labels on bars (clean)
+            fig_price.update_traces(texttemplate=None)
+            fig_price.update_layout(
+                yaxis_title="Price (USD)",
+                legend_title_text="Brand",
+            )
+            st.plotly_chart(fig_price, use_container_width=True)
 
-fig_price = px.bar(
-    df_price,
-    x="Competitor",
-    y="Price",
-    color="Competitor",  # ✅ makes bars multi-color
-    color_discrete_map=COMP_COLOR_MAP,  # ✅ uses same palette system
-    title=f"Verified Pricing (USD) — {product_name} vs competitors",
-)
+            with st.expander("🔎 Raw pricing JSON", expanded=False):
+                st.json(prices_json)
 
-fig_price.update_traces(texttemplate=None)
-fig_price.update_layout(
-    yaxis_title="Price (USD)",
-    xaxis_title="",
-    legend_title_text="",
-)
-st.plotly_chart(fig_price, use_container_width=True)
 # ============================
 # Features
 # ============================
@@ -336,6 +351,14 @@ with tab_features:
             df_scores = df_scores[df_scores["product"].isin(selected_products)]
             df_scores = df_scores[df_scores["feature"].isin(features_list)]
 
+            present = sorted(df_scores["product"].unique().tolist())
+            missing = [p for p in selected_products if p not in present]
+            if missing:
+                st.warning(
+                    f"Missing score rows for: {', '.join(missing)} "
+                    f"(your task prompt should force full coverage)."
+                )
+
             if df_scores.empty:
                 st.info("No scores matched your selected competitors/features. Run analysis again.")
             else:
@@ -346,6 +369,7 @@ with tab_features:
                     color="product",
                     line_close=True,
                     title=f"Feature Comparison: {product_name} vs Selected Competitors",
+                    color_discrete_sequence=MM_PALETTE,
                 )
                 fig_radar.update_traces(fill="toself", opacity=0.55)
                 st.plotly_chart(fig_radar, use_container_width=True)
@@ -363,7 +387,7 @@ with tab_features:
 # ============================
 with tab_growth:
     st.subheader("📈 Product Demand / Growth Trend")
-    st.caption("This is intended to be product-specific (not generic industry growth).")
+    st.caption("This should be product-specific (not generic industry growth).")
 
     if not growth_json:
         st.info("Run analysis to generate product trend.")
@@ -381,6 +405,7 @@ with tab_growth:
                 y="Demand / Growth (%)",
                 markers=True,
                 title=f"{product_name} — Demand / Growth Trend ({geography})",
+                color_discrete_sequence=[MM_PALETTE[0]],
             )
             fig_growth.update_layout(xaxis=dict(type="category"))
             st.plotly_chart(fig_growth, use_container_width=True)
@@ -408,9 +433,11 @@ with tab_reports:
     else:
         preferred_order = [
             "research_plan.md",
+            "competitor_analysis.md",
             "customer_analysis.md",
             "review_sentiment.md",
             "feature_comparison.md",
+            "executive_summary.md",
             "final_market_strategy_report.md",
         ]
         ordered = [f for f in preferred_order if f in md_files] + sorted(
@@ -424,6 +451,7 @@ with tab_reports:
 
         st.markdown("---")
         st.caption("Tip: If a report is missing, ensure main.py writes it even if empty (write the file anyway).")
+
 
 
 
