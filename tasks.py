@@ -8,17 +8,22 @@ class MarketResearchTasks:
     # Markdown Tasks
     # ---------------------------
     def research_planning_task(self, agent, product_name: str, industry: str):
-        return Task(
-            description=(
-                f"Create a structured market research plan for '{product_name}' in the '{industry}' industry.\n"
-                "Output in markdown.\n\n"
-                "Rules:\n"
-                "- Do NOT invent numbers or citations.\n"
-                "- If you make assumptions, label them as assumptions.\n"
-            ),
-            expected_output="Markdown research plan.",
-            agent=agent,
-        )
+    return Task(
+        description=(
+            f"Create a structured market research plan for '{product_name}' in the '{industry}' industry.\n\n"
+            "CRITICAL RULES:\n"
+            "- DO NOT include any timeline section.\n"
+            "- DO NOT include duration tables.\n"
+            "- DO NOT include weeks or phased planning.\n"
+            "- Focus only on research objectives, methodology, data sources, risks.\n"
+            "- Do NOT invent numbers or citations.\n"
+            "- Label assumptions clearly.\n\n"
+            "Output in markdown."
+        ),
+        expected_output="Markdown research plan without timeline.",
+        agent=agent,
+    )
+
 
     def customer_persona_task(
         self,
@@ -226,18 +231,19 @@ class MarketResearchTasks:
     # Final Synthesis (Markdown)
     # ---------------------------
     def synthesis_task(self, agent, product_name: str, industry: str, context_tasks: List[Task]):
-        return Task(
-            description=(
-                f"Synthesize prior outputs into a final strategy report for '{product_name}' in '{industry}'.\n\n"
-                "Rules:\n"
-                "- Do NOT include an implementation timeline unless user explicitly requested it.\n"
-                "- Do NOT include budgets unless user explicitly provided a budget range.\n"
-                "- Any claims about sentiment must match the sentiment JSON.\n"
-                "- If no_verified_sources=true, explicitly state sentiment is not source-verified.\n"
-                "Output in markdown."
-            ),
-            expected_output="Final markdown strategy report.",
-            agent=agent,
-            context=context_tasks,
-        )
-
+    return Task(
+        description=(
+            f"Synthesize prior outputs into a final strategy report for '{product_name}' in '{industry}'.\n\n"
+            "STRICT RULES:\n"
+            "- DO NOT include an implementation timeline.\n"
+            "- DO NOT include phased plans.\n"
+            "- DO NOT include duration tables.\n"
+            "- DO NOT include budgets unless user explicitly provided them.\n"
+            "- Any sentiment claims must match the sentiment JSON.\n"
+            "- If no_verified_sources=true, clearly state sentiment is not source-verified.\n\n"
+            "Output in markdown."
+        ),
+        expected_output="Final markdown strategy report.",
+        agent=agent,
+        context=context_tasks,
+    )
